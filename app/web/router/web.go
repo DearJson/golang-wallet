@@ -46,7 +46,7 @@ func init() {
 			//查询v3代币价格
 			//group.POST("/getCoinPrice", api.Bsc.V3GetCoinPrice)
 			//查询用户nft持有情况
-			group.POST("/getUserNft", api.Bsc.GetUserNft)
+			//group.POST("/getUserNft", api.Bsc.GetUserNft)
 			//查询某笔交易详情
 			group.POST("/transferDetail", api.Bsc.GetTransferDetail)
 			//查询充值合约自动买币自动添加流动性LP数量

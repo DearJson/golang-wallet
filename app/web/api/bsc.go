@@ -8,7 +8,6 @@ import (
 	"gfast/abi/erc20"
 	"gfast/abi/lp"
 	"gfast/abi/lp3"
-	"gfast/abi/nft"
 	"gfast/abi/swap"
 	"gfast/abi/uniswapv3"
 	"gfast/amqp"
@@ -578,40 +577,40 @@ func (b *bsc) V3GetCoinPrice(r *ghttp.Request) {
 }
 
 // GetUserNft 获取用户持有NFT信息
-func (b *bsc) GetUserNft(r *ghttp.Request) {
-	var req *webDao.GetUserNftReq
-	//获取参数
-	if err := r.Parse(&req); err != nil {
-		b.FailJsonExit(r, err.(gvalid.Error).FirstString())
-	}
-
-	cache := cservice.Cache.New()
-	rpcUrl := gconv.String(cache.Get("bnb_rpc_url"))
-	client, err := ethclient.Dial(rpcUrl)
-	nftContract, err := nft.NewNftAbi(common.HexToAddress(req.ContractAddress), client)
-	if err != nil {
-		b.FailJsonExit(r, "查询失败")
-	}
-	transactOpts := &bind.CallOpts{
-		Pending:     false,
-		From:        common.Address{},
-		BlockNumber: nil,
-		Context:     nil,
-	}
-	//查询用户NFT数量
-	nftCount, _ := nftContract.GetUserCardCount(transactOpts, common.HexToAddress(req.Address))
-	var (
-		nftList []string
-		i       int64
-	)
-	if nftCount.Int64() > 0 {
-		for i = 0; i < nftCount.Int64(); i++ {
-			tokenId, _ := nftContract.TokenOfOwnerByIndex(transactOpts, common.HexToAddress(req.Address), big.NewInt(i))
-			nftList = append(nftList, tokenId.String())
-		}
-	}
-	b.SusJsonExit(r, g.Map{"count": nftCount, "list": nftList})
-}
+//func (b *bsc) GetUserNft(r *ghttp.Request) {
+//	var req *webDao.GetUserNftReq
+//	//获取参数
+//	if err := r.Parse(&req); err != nil {
+//		b.FailJsonExit(r, err.(gvalid.Error).FirstString())
+//	}
+//
+//	cache := cservice.Cache.New()
+//	rpcUrl := gconv.String(cache.Get("bnb_rpc_url"))
+//	client, err := ethclient.Dial(rpcUrl)
+//	nftContract, err := nft.NewNftAbi(common.HexToAddress(req.ContractAddress), client)
+//	if err != nil {
+//		b.FailJsonExit(r, "查询失败")
+//	}
+//	transactOpts := &bind.CallOpts{
+//		Pending:     false,
+//		From:        common.Address{},
+//		BlockNumber: nil,
+//		Context:     nil,
+//	}
+//	//查询用户NFT数量
+//	nftCount, _ := nftContract.GetUserCardCount(transactOpts, common.HexToAddress(req.Address))
+//	var (
+//		nftList []string
+//		i       int64
+//	)
+//	if nftCount.Int64() > 0 {
+//		for i = 0; i < nftCount.Int64(); i++ {
+//			tokenId, _ := nftContract.TokenOfOwnerByIndex(transactOpts, common.HexToAddress(req.Address), big.NewInt(i))
+//			nftList = append(nftList, tokenId.String())
+//		}
+//	}
+//	b.SusJsonExit(r, g.Map{"count": nftCount, "list": nftList})
+//}
 
 // GetTransferDetail 根据hash获取交易详情
 func (b *bsc) GetTransferDetail(r *ghttp.Request) {

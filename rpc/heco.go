@@ -4,9 +4,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
-	"gfast/abi/nft"
 	"gfast/app/common/service"
-	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -74,7 +72,7 @@ func (b *HecoClient) GetTransactionCount(address string) (nonce interface{}, err
 	return _nonce, err
 }
 
-//HecoTransferHt 转账HT
+// HecoTransferHt 转账HT
 func HecoTransferHt(privateKeys string, amount *big.Int, toAddress string, MaxNonce uint64) (transferData interface{}, currentNonce uint64, err error) {
 	cache := service.Cache.New()
 	rpcUrl := gconv.String(cache.Get("heco_rpc_url"))
@@ -132,7 +130,7 @@ func HecoTransferHt(privateKeys string, amount *big.Int, toAddress string, MaxNo
 	return signedTx.Hash().Hex(), nonce, nil
 }
 
-//HecoTransferToken 转账其他代币
+// HecoTransferToken 转账其他代币
 func HecoTransferToken(privateKeys string, amount *big.Int, toAddress string, tokenAddress string, MaxNonce uint64) (transferData interface{}, currentNonce uint64, err error) {
 	cache := service.Cache.New()
 	rpcUrl := gconv.String(cache.Get("heco_rpc_url"))
@@ -202,113 +200,113 @@ func HecoTransferToken(privateKeys string, amount *big.Int, toAddress string, to
 }
 
 //HecoMintNft 铸造NFT给某个用户
-func HecoMintNft(privateKeys string, toAddress string, tokenAddress string, tokenId *big.Int, _uri string, MaxNonce uint64) (nftData interface{}, currentNonce uint64, err error) {
-	cache := service.Cache.New()
-	rpcUrl := gconv.String(cache.Get("heco_rpc_url"))
-	client, err := ethclient.Dial(rpcUrl)
-	if err != nil {
-		g.Log().File("withdraw.{Y-m-d}.log").Printf("%v", err)
-		return nil, 0, err
-	}
-	defer client.Close()
-	nftContract, err := nft.NewNftAbi(common.HexToAddress(tokenAddress), client)
-	if err != nil {
-		g.Log().File("withdraw.{Y-m-d}.log").Printf("%v", err)
-		return nil, 0, err
-	}
-	privateKey, err := crypto.HexToECDSA(privateKeys)
-	publicKey := privateKey.Public()
-	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
-	if !ok {
-		g.Log().File("withdraw.{Y-m-d}.log").Println("cannot assert type: publicKey is not of type *ecdsa.PublicKey")
-		return nil, 0, err
-	}
-	fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
-	nonce, err := client.PendingNonceAt(context.Background(), fromAddress)
-	if err != nil {
-		g.Log().File("withdraw.{Y-m-d}.log").Printf("%v", err)
-		return nil, 0, err
-	}
-	chainID := g.Cfg().GetInt64("bsc.chain_id")
-	auth, err := bind.NewKeyedTransactorWithChainID(privateKey, big.NewInt(chainID))
-	if err != nil {
-		g.Log().File("withdraw.{Y-m-d}.log").Printf("%v", err)
-		return nil, 0, err
-	}
-
-	isMint := false
-
-	//检查该卡牌是否已铸造，已铸造无需重复铸造
-	transactOpts := &bind.CallOpts{
-		Pending:     false,
-		From:        common.Address{},
-		BlockNumber: nil,
-		Context:     nil,
-	}
-	val, err := nftContract.OwnerOf(transactOpts, tokenId)
-	if err != nil {
-		if err.Error() == "00302" || val.String() == "0x0000000000000000000000000000000000000000" {
-			isMint = false
-		} else {
-			g.Log().File("withdraw.{Y-m-d}.log").Printf("查询tokenId=%v 归属权失败 %v", 2, err)
-			return nil, 0, err
-		}
-	} else {
-		if val.String() != fromAddress.String() {
-			g.Log().File("withdraw.{Y-m-d}.log").Printf("卡牌归属权不在提币地址上,归属=%v,提币地址=%v", val.String(), fromAddress.String())
-			return nil, 0, err
-		} else {
-			isMint = true
-		}
-	}
-
-	gasLimitConfig, _ := service.SysConfig.GetConfigByKey("sys.bnbGasLimit")
-	gasLimit := gconv.Uint64(gasLimitConfig.ConfigValue) // in units
-	gasPriceConfig, _ := service.SysConfig.GetConfigByKey("sys.bnbGasPrice")
-	gasPrice := new(big.Int)
-	gasPrice = big.NewInt(gconv.Int64(gasPriceConfig.ConfigValue) * gconv.Int64(math.Pow(10, 9)))
-
-	//检查一下，最新的nonce是否大于数据库的最后一条nonce+1,如果是，取这个获取的
-	if MaxNonce > 0 {
-		NextNonce := gconv.Uint64(MaxNonce) + 1
-		if nonce < NextNonce {
-			nonce = NextNonce
-		}
-	}
-
-	if isMint {
-		transactOptss := &bind.TransactOpts{
-			From:     fromAddress,
-			Nonce:    big.NewInt(gconv.Int64(nonce)),
-			Signer:   auth.Signer,
-			Value:    big.NewInt(0),
-			GasPrice: gasPrice,
-			GasLimit: gasLimit,
-			Context:  auth.Context,
-			NoSend:   false,
-		}
-		val, err := nftContract.SafeTransferFrom(transactOptss, fromAddress, common.HexToAddress(toAddress), tokenId)
-		if err != nil {
-			g.Log().File("withdraw.{Y-m-d}.log").Printf("%v", err)
-			return nil, 0, err
-		}
-		return val.Hash().Hex(), nonce, nil
-	} else {
-		transactOptss := &bind.TransactOpts{
-			From:     fromAddress,
-			Nonce:    big.NewInt(gconv.Int64(nonce)),
-			Signer:   auth.Signer,
-			Value:    big.NewInt(0),
-			GasPrice: gasPrice,
-			GasLimit: gasLimit,
-			Context:  auth.Context,
-			NoSend:   false,
-		}
-		val, err := nftContract.Mint(transactOptss, common.HexToAddress(toAddress), tokenId, _uri)
-		if err != nil {
-			g.Log().File("withdraw.{Y-m-d}.log").Printf("%v", err)
-			return nil, 0, err
-		}
-		return val.Hash().Hex(), nonce, nil
-	}
-}
+//func HecoMintNft(privateKeys string, toAddress string, tokenAddress string, tokenId *big.Int, _uri string, MaxNonce uint64) (nftData interface{}, currentNonce uint64, err error) {
+//	cache := service.Cache.New()
+//	rpcUrl := gconv.String(cache.Get("heco_rpc_url"))
+//	client, err := ethclient.Dial(rpcUrl)
+//	if err != nil {
+//		g.Log().File("withdraw.{Y-m-d}.log").Printf("%v", err)
+//		return nil, 0, err
+//	}
+//	defer client.Close()
+//	nftContract, err := nft.NewNftAbi(common.HexToAddress(tokenAddress), client)
+//	if err != nil {
+//		g.Log().File("withdraw.{Y-m-d}.log").Printf("%v", err)
+//		return nil, 0, err
+//	}
+//	privateKey, err := crypto.HexToECDSA(privateKeys)
+//	publicKey := privateKey.Public()
+//	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
+//	if !ok {
+//		g.Log().File("withdraw.{Y-m-d}.log").Println("cannot assert type: publicKey is not of type *ecdsa.PublicKey")
+//		return nil, 0, err
+//	}
+//	fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
+//	nonce, err := client.PendingNonceAt(context.Background(), fromAddress)
+//	if err != nil {
+//		g.Log().File("withdraw.{Y-m-d}.log").Printf("%v", err)
+//		return nil, 0, err
+//	}
+//	chainID := g.Cfg().GetInt64("bsc.chain_id")
+//	auth, err := bind.NewKeyedTransactorWithChainID(privateKey, big.NewInt(chainID))
+//	if err != nil {
+//		g.Log().File("withdraw.{Y-m-d}.log").Printf("%v", err)
+//		return nil, 0, err
+//	}
+//
+//	isMint := false
+//
+//	//检查该卡牌是否已铸造，已铸造无需重复铸造
+//	transactOpts := &bind.CallOpts{
+//		Pending:     false,
+//		From:        common.Address{},
+//		BlockNumber: nil,
+//		Context:     nil,
+//	}
+//	val, err := nftContract.OwnerOf(transactOpts, tokenId)
+//	if err != nil {
+//		if err.Error() == "00302" || val.String() == "0x0000000000000000000000000000000000000000" {
+//			isMint = false
+//		} else {
+//			g.Log().File("withdraw.{Y-m-d}.log").Printf("查询tokenId=%v 归属权失败 %v", 2, err)
+//			return nil, 0, err
+//		}
+//	} else {
+//		if val.String() != fromAddress.String() {
+//			g.Log().File("withdraw.{Y-m-d}.log").Printf("卡牌归属权不在提币地址上,归属=%v,提币地址=%v", val.String(), fromAddress.String())
+//			return nil, 0, err
+//		} else {
+//			isMint = true
+//		}
+//	}
+//
+//	gasLimitConfig, _ := service.SysConfig.GetConfigByKey("sys.bnbGasLimit")
+//	gasLimit := gconv.Uint64(gasLimitConfig.ConfigValue) // in units
+//	gasPriceConfig, _ := service.SysConfig.GetConfigByKey("sys.bnbGasPrice")
+//	gasPrice := new(big.Int)
+//	gasPrice = big.NewInt(gconv.Int64(gasPriceConfig.ConfigValue) * gconv.Int64(math.Pow(10, 9)))
+//
+//	//检查一下，最新的nonce是否大于数据库的最后一条nonce+1,如果是，取这个获取的
+//	if MaxNonce > 0 {
+//		NextNonce := gconv.Uint64(MaxNonce) + 1
+//		if nonce < NextNonce {
+//			nonce = NextNonce
+//		}
+//	}
+//
+//	if isMint {
+//		transactOptss := &bind.TransactOpts{
+//			From:     fromAddress,
+//			Nonce:    big.NewInt(gconv.Int64(nonce)),
+//			Signer:   auth.Signer,
+//			Value:    big.NewInt(0),
+//			GasPrice: gasPrice,
+//			GasLimit: gasLimit,
+//			Context:  auth.Context,
+//			NoSend:   false,
+//		}
+//		val, err := nftContract.SafeTransferFrom(transactOptss, fromAddress, common.HexToAddress(toAddress), tokenId)
+//		if err != nil {
+//			g.Log().File("withdraw.{Y-m-d}.log").Printf("%v", err)
+//			return nil, 0, err
+//		}
+//		return val.Hash().Hex(), nonce, nil
+//	} else {
+//		transactOptss := &bind.TransactOpts{
+//			From:     fromAddress,
+//			Nonce:    big.NewInt(gconv.Int64(nonce)),
+//			Signer:   auth.Signer,
+//			Value:    big.NewInt(0),
+//			GasPrice: gasPrice,
+//			GasLimit: gasLimit,
+//			Context:  auth.Context,
+//			NoSend:   false,
+//		}
+//		val, err := nftContract.Mint(transactOptss, common.HexToAddress(toAddress), tokenId, _uri)
+//		if err != nil {
+//			g.Log().File("withdraw.{Y-m-d}.log").Printf("%v", err)
+//			return nil, 0, err
+//		}
+//		return val.Hash().Hex(), nonce, nil
+//	}
+//}

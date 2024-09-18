@@ -234,7 +234,6 @@ func hecoRecharge() {
 
 // tronRecharge 波场链任务归集
 func tronRecharge() {
-	g.Log().File("merge_recharge.{Y-m-d}.log").Printf("波场归集地址或手续费私钥地址未配置，退出归集")
 	//判断一下是否有配置手续费地址和归集地址
 	tronMergeAddress, _ := service.SysConfig.GetConfigByKey("sys.tronMergeAddress")
 	tronFeeAddress, _ := service.SysConfig.GetConfigByKey("sys.tronFeeAddress")

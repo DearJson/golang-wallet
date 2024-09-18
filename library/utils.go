@@ -23,24 +23,24 @@ import (
 	"strings"
 )
 
-//密码加密
+// 密码加密
 func EncryptPassword(password, salt string) string {
 	return gmd5.MustEncryptString(gmd5.MustEncryptString(password) + gmd5.MustEncryptString(salt))
 }
 
-//时间戳转 yyyy-MM-dd HH:mm:ss
+// 时间戳转 yyyy-MM-dd HH:mm:ss
 func TimeStampToDateTime(timeStamp int64) string {
 	tm := gtime.NewFromTimeStamp(timeStamp)
 	return tm.Format("Y-m-d H:i:s")
 }
 
-//时间戳转 yyyy-MM-dd
+// 时间戳转 yyyy-MM-dd
 func TimeStampToDate(timeStamp int64) string {
 	tm := gtime.NewFromTimeStamp(timeStamp)
 	return tm.Format("Y-m-d")
 }
 
-//获取当前请求接口域名
+// 获取当前请求接口域名
 func GetDomain(r *ghttp.Request) (string, error) {
 	pathInfo, err := gurl.ParseURL(r.GetUrl(), -1)
 	if err != nil {
@@ -51,16 +51,18 @@ func GetDomain(r *ghttp.Request) (string, error) {
 	return fmt.Sprintf("%s://%s:%s/", pathInfo["scheme"], pathInfo["host"], pathInfo["port"]), nil
 }
 
-//获取客户端IP
+// 获取客户端IP
 func GetClientIp(r *ghttp.Request) string {
 	ip := r.Header.Get("X-Forwarded-For")
+
+	g.Log().Printf("当前操作IP: %v", ip)
 	if ip == "" {
 		ip = r.GetClientIp()
 	}
 	return ip
 }
 
-//服务端ip
+// 服务端ip
 func GetLocalIP() (ip string, err error) {
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
@@ -82,7 +84,7 @@ func GetLocalIP() (ip string, err error) {
 	return
 }
 
-//获取ip所属城市
+// 获取ip所属城市
 func GetCityByIp(ip string) string {
 	if ip == "" {
 		return ""
@@ -107,7 +109,7 @@ func GetCityByIp(ip string) string {
 	}
 }
 
-//日期字符串转时间戳（秒）
+// 日期字符串转时间戳（秒）
 func StrToTimestamp(dateStr string) int64 {
 	tm, err := gtime.StrToTime(dateStr)
 	if err != nil {
@@ -202,7 +204,7 @@ func ParseDSN(cfg *gdb.ConfigNode) (err error) {
 	return
 }
 
-//获取附件真实路径
+// 获取附件真实路径
 func GetRealFilesUrl(r *ghttp.Request, path string) (realPath string, err error) {
 	if gstr.ContainsI(path, "http") {
 		realPath = path
@@ -216,7 +218,7 @@ func GetRealFilesUrl(r *ghttp.Request, path string) (realPath string, err error)
 	return
 }
 
-//获取附件相对路径
+// 获取附件相对路径
 func GetFilesPath(fileUrl string) (path string, err error) {
 	upType := gstr.ToLower(g.Cfg().GetString("upload.type"))
 	upPath := gstr.Trim(g.Cfg().GetString("upload.local.UpPath"), "/")
@@ -237,7 +239,7 @@ func GetFilesPath(fileUrl string) (path string, err error) {
 	return
 }
 
-//货币转化为分
+// 货币转化为分
 func CurrencyLong(currency interface{}) int64 {
 	strArr := gstr.Split(gconv.String(currency), ".")
 	switch len(strArr) {
@@ -312,7 +314,7 @@ func SubStr(str string, start int, length int) (result string) {
 	return
 }
 
-//StrPadLeft 给字符串左补某个字符串
+// StrPadLeft 给字符串左补某个字符串
 func StrPadLeft(input string, padLength int, padString string) string {
 	output := padString
 
@@ -327,14 +329,14 @@ func StrPadLeft(input string, padLength int, padString string) string {
 	return output[:padLength-len(input)] + input
 }
 
-//HexToBigInt 十六进制转十进制
+// HexToBigInt 十六进制转十进制
 func HexToBigInt(hex string) *big.Int {
 	n := new(big.Int)
 	n, _ = n.SetString(hex[2:], 16)
 	return n
 }
 
-//Hex2Bin 十六进制转string
+// Hex2Bin 十六进制转string
 func Hex2Bin(hex string) (string, error) {
 	ui, err := strconv.ParseUint(hex, 16, 64)
 	if err != nil {
@@ -343,7 +345,7 @@ func Hex2Bin(hex string) (string, error) {
 	return fmt.Sprintf("%016b", ui), nil
 }
 
-//Explode 字符串分割为数组
+// Explode 字符串分割为数组
 func Explode(delimiter string, text string) []string {
 	if len(delimiter) > len(text) {
 		return strings.Split(delimiter, text)

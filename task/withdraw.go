@@ -22,9 +22,9 @@ func withdrawTask() {
 	if g.Config().GetBool("tron.contract_recharge") || g.Config().GetBool("tron.address_recharge") {
 		tronWithdraw()
 	}
-	if g.Config().GetBool("heco.contract_recharge") || g.Config().GetBool("heco.address_recharge") {
-		hecoWithdraw()
-	}
+	//if g.Config().GetBool("heco.contract_recharge") || g.Config().GetBool("heco.address_recharge") {
+	//	hecoWithdraw()
+	//}
 	if g.Config().GetBool("wemix.contract_recharge") || g.Config().GetBool("wemix.address_recharge") {
 		wemixWithdraw()
 	}
@@ -170,70 +170,70 @@ func ethWithdraw() {
 	}
 }
 
-func hecoWithdraw() {
-	hecoWithdrawPrivateKeyConfig, _ := service.SysConfig.GetConfigByKey("sys.hecoWithdrawAddressPrivateKey")
-	//如果未配置出金地址，退出
-	if hecoWithdrawPrivateKeyConfig.ConfigValue == "" {
-		return
-	}
-
-	//查询所有待出金的任务
-	ids, err := g.Model("withdraw").Where("main_chain", "heco").Where("status", 2).Limit(20).Array("id")
-	if err != nil {
-		return
-	}
-	if len(ids) == 0 {
-		return
-	}
-
-	bnbPrivateKey, _ := library.DecryptByAes(hecoWithdrawPrivateKeyConfig.ConfigValue)
-	for _, id := range ids {
-		var value *model.Withdraw
-		var currency *model.Currency
-		var hashResult interface{}
-		var nonce uint64
-		//查询状态
-		g.Model("withdraw").Where("id", id).Where("status", 2).FindScan(&value)
-		if value == nil {
-			continue
-		}
-		//查询币种
-		g.Model("currency").Where("main_chain", "heco").Where("contract_address", value.ContractAddress).FindScan(&currency)
-		if currency == nil {
-			continue
-		}
-
-		hashKey := library.Md5Data(value.Address, value.ContractAddress, value.Amount, value.Status, value.Nonce1)
-		//如果验证加密key不一致，直接该状态为0
-		if hashKey != value.HashKey {
-			g.Model("withdraw").Data(g.Map{"status": 0}).Where("id", value.Id).Update()
-		}
-
-		//处理金额
-		amount := decimal.NewFromFloat(value.Amount)
-		tenDecimal := decimal.NewFromFloat(math.Pow(10, float64(currency.Decimals)))
-		convertAmount := amount.Mul(tenDecimal).BigInt()
-		withdrawAddress, _ := service.SysConfig.GetConfigByKey("sys.hecoWithdrawAddress")
-		MaxNonce, _ := g.Model("withdraw").Where("main_chain", "heco").Where("withdraw_address", withdrawAddress.ConfigValue).WhereIn("status", [3]int{3, 4, 5}).Max("nonce")
-
-		if currency.Decimals == 0 {
-			//这里是提现NFT卡牌
-			hashResult, nonce, _ = rpc.HecoMintNft(string(bnbPrivateKey), value.Address, currency.ContractAddress, big.NewInt(value.TokenId), value.Url, gconv.Uint64(MaxNonce))
-			fmt.Printf("%v,,,,%v \n", hashResult, err)
-		} else {
-			if currency.ContractAddress == "0x1000000000000000000000000000000000000000" {
-				hashResult, nonce, _ = rpc.HecoTransferHt(string(bnbPrivateKey), convertAmount, value.Address, gconv.Uint64(MaxNonce))
-			} else {
-				hashResult, nonce, _ = rpc.HecoTransferToken(string(bnbPrivateKey), convertAmount, value.Address, currency.ContractAddress, gconv.Uint64(MaxNonce))
-			}
-		}
-
-		if hashResult != nil {
-			hashKey = library.Md5Data(value.Address, value.ContractAddress, value.Amount, 3, value.Nonce1)
-			g.Model("withdraw").Data(g.Map{"withdraw_address": withdrawAddress.ConfigValue, "hashKey": hashKey, "hash": hashResult, "nonce": nonce, "status": 3}).Where("id", value.Id).Update()
-		}
-	}
-}
+//func hecoWithdraw() {
+//	hecoWithdrawPrivateKeyConfig, _ := service.SysConfig.GetConfigByKey("sys.hecoWithdrawAddressPrivateKey")
+//	//如果未配置出金地址，退出
+//	if hecoWithdrawPrivateKeyConfig.ConfigValue == "" {
+//		return
+//	}
+//
+//	//查询所有待出金的任务
+//	ids, err := g.Model("withdraw").Where("main_chain", "heco").Where("status", 2).Limit(20).Array("id")
+//	if err != nil {
+//		return
+//	}
+//	if len(ids) == 0 {
+//		return
+//	}
+//
+//	bnbPrivateKey, _ := library.DecryptByAes(hecoWithdrawPrivateKeyConfig.ConfigValue)
+//	for _, id := range ids {
+//		var value *model.Withdraw
+//		var currency *model.Currency
+//		var hashResult interface{}
+//		var nonce uint64
+//		//查询状态
+//		g.Model("withdraw").Where("id", id).Where("status", 2).FindScan(&value)
+//		if value == nil {
+//			continue
+//		}
+//		//查询币种
+//		g.Model("currency").Where("main_chain", "heco").Where("contract_address", value.ContractAddress).FindScan(&currency)
+//		if currency == nil {
+//			continue
+//		}
+//
+//		hashKey := library.Md5Data(value.Address, value.ContractAddress, value.Amount, value.Status, value.Nonce1)
+//		//如果验证加密key不一致，直接该状态为0
+//		if hashKey != value.HashKey {
+//			g.Model("withdraw").Data(g.Map{"status": 0}).Where("id", value.Id).Update()
+//		}
+//
+//		//处理金额
+//		amount := decimal.NewFromFloat(value.Amount)
+//		tenDecimal := decimal.NewFromFloat(math.Pow(10, float64(currency.Decimals)))
+//		convertAmount := amount.Mul(tenDecimal).BigInt()
+//		withdrawAddress, _ := service.SysConfig.GetConfigByKey("sys.hecoWithdrawAddress")
+//		MaxNonce, _ := g.Model("withdraw").Where("main_chain", "heco").Where("withdraw_address", withdrawAddress.ConfigValue).WhereIn("status", [3]int{3, 4, 5}).Max("nonce")
+//
+//		if currency.Decimals == 0 {
+//			//这里是提现NFT卡牌
+//			hashResult, nonce, _ = rpc.HecoMintNft(string(bnbPrivateKey), value.Address, currency.ContractAddress, big.NewInt(value.TokenId), value.Url, gconv.Uint64(MaxNonce))
+//			fmt.Printf("%v,,,,%v \n", hashResult, err)
+//		} else {
+//			if currency.ContractAddress == "0x1000000000000000000000000000000000000000" {
+//				hashResult, nonce, _ = rpc.HecoTransferHt(string(bnbPrivateKey), convertAmount, value.Address, gconv.Uint64(MaxNonce))
+//			} else {
+//				hashResult, nonce, _ = rpc.HecoTransferToken(string(bnbPrivateKey), convertAmount, value.Address, currency.ContractAddress, gconv.Uint64(MaxNonce))
+//			}
+//		}
+//
+//		if hashResult != nil {
+//			hashKey = library.Md5Data(value.Address, value.ContractAddress, value.Amount, 3, value.Nonce1)
+//			g.Model("withdraw").Data(g.Map{"withdraw_address": withdrawAddress.ConfigValue, "hashKey": hashKey, "hash": hashResult, "nonce": nonce, "status": 3}).Where("id", value.Id).Update()
+//		}
+//	}
+//}
 
 func tronWithdraw() {
 	g.Log().File("withdraw.{Y-m-d}.log").Printf("开始处理波场出金任务")

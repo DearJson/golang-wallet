@@ -37,7 +37,8 @@ func (c *sysConfig) List(r *ghttp.Request) {
 		if value.ConfigKey == "sys.bnbWithdrawAddressPrivateKey" || value.ConfigKey == "sys.bnbFeeAddressPrivateKey" ||
 			value.ConfigKey == "sys.tronWithdrawAddressPrivateKey" || value.ConfigKey == "sys.tronFeeAddressPrivateKey" ||
 			value.ConfigKey == "sys.hecoWithdrawAddressPrivateKey" || value.ConfigKey == "sys.hecoFeeAddressPrivateKey" ||
-			value.ConfigKey == "sys.wemixWithdrawAddressPrivateKey" || value.ConfigKey == "sys.wemixFeeAddressPrivateKey" {
+			value.ConfigKey == "sys.wemixWithdrawAddressPrivateKey" || value.ConfigKey == "sys.wemixFeeAddressPrivateKey" ||
+			value.ConfigKey == "sys.ethWithdrawAddressPrivateKey" || value.ConfigKey == "sys.ethFeeAddressPrivateKey" {
 			value.ConfigValue = "*************************************"
 		}
 	}
@@ -84,7 +85,8 @@ func (c *sysConfig) Get(r *ghttp.Request) {
 	if params.ConfigKey == "sys.bnbWithdrawAddressPrivateKey" || params.ConfigKey == "sys.bnbFeeAddressPrivateKey" ||
 		params.ConfigKey == "sys.tronWithdrawAddressPrivateKey" || params.ConfigKey == "sys.tronFeeAddressPrivateKey" ||
 		params.ConfigKey == "sys.hecoWithdrawAddressPrivateKey" || params.ConfigKey == "sys.hecoFeeAddressPrivateKey" ||
-		params.ConfigKey == "sys.wemixWithdrawAddressPrivateKey" || params.ConfigKey == "sys.wemixFeeAddressPrivateKey" {
+		params.ConfigKey == "sys.wemixWithdrawAddressPrivateKey" || params.ConfigKey == "sys.wemixFeeAddressPrivateKey" ||
+		params.ConfigKey == "sys.ethWithdrawAddressPrivateKey" || params.ConfigKey == "sys.ethFeeAddressPrivateKey" {
 		params.ConfigValue = "*************************************"
 	}
 

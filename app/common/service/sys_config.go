@@ -108,8 +108,8 @@ func (s *sysConfig) EditSave(req *model.SysConfigEditReq) (err error) {
 	if req.ConfigKey == "sys.bnbWithdrawAddressPrivateKey" || req.ConfigKey == "sys.bnbFeeAddressPrivateKey" ||
 		req.ConfigKey == "sys.tronWithdrawAddressPrivateKey" || req.ConfigKey == "sys.tronFeeAddressPrivateKey" ||
 		req.ConfigKey == "sys.hecoWithdrawAddressPrivateKey" || req.ConfigKey == "sys.hecoFeeAddressPrivateKey" ||
-		req.ConfigKey == "sys.wemixWithdrawAddressPrivateKey" || req.ConfigKey == "sys.wemixFeeAddressPrivateKey" {
-
+		req.ConfigKey == "sys.wemixWithdrawAddressPrivateKey" || req.ConfigKey == "sys.wemixFeeAddressPrivateKey" ||
+		req.ConfigKey == "sys.ethWithdrawAddressPrivateKey" || req.ConfigKey == "sys.ethFeeAddressPrivateKey" {
 		//如果私钥带有前面带有0x去掉
 		if req.ConfigValue[0:2] == "0x" {
 			req.ConfigValue = req.ConfigValue[2:]

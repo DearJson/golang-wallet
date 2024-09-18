@@ -4,7 +4,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
-	"gfast/abi/newNft"
+	"gfast/abi/nft"
 	"gfast/abi/swap"
 	token2 "gfast/abi/token"
 	"gfast/app/common/service"
@@ -419,12 +419,14 @@ func SafeTransferFrom(privateKeys string, toAddress string, tokenAddress string,
 		Context:  auth.Context,
 		NoSend:   false,
 	}
-	nftContract, err := newNft.NewNewNft(common.HexToAddress(tokenAddress), client)
-	val, err := nftContract.SafeTransferFrom(transactOptss, fromAddress, common.HexToAddress(toAddress), tokenId, _num, nil)
+	nftContract, err := nft.NewNft(common.HexToAddress(tokenAddress), client)
+	if err != nil {
+		g.Log().File("withdraw.{Y-m-d}.log").Printf("%v", err)
+	}
+	val, err := nftContract.TransferFrom(transactOptss, fromAddress, common.HexToAddress(toAddress), tokenId)
 	if err != nil {
 		g.Log().File("withdraw.{Y-m-d}.log").Printf("%v", err)
 		return nil, 0, err
 	}
 	return val.Hash().Hex(), nonce, nil
-
 }

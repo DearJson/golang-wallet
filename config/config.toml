@@ -109,8 +109,8 @@
     secret = "AICOTBGVN6FZV7DETYNCZYHXPKL5BENX"
 ##配置bsc链
 [bsc]
-    contract_recharge = true   ##是否开启合约充值
-    contract_address = "0x6d3a964894c8d31e0f0358db4c980f0db93c2a5d"  ##合约充值地址(注意小写)
+    contract_recharge = false   ##是否开启合约充值
+    contract_address = "0x26dfd9dcf6c5667c7c59dc39bda7f4cc9d7e0096"  ##合约充值地址(注意小写)
     address_recharge = false ##是否开启获取地址充值
     chain_id = 56
     rpc_address = "https://data-seed-prebsc-1-s1.binance.org:8545/"##rpc地址
@@ -118,7 +118,7 @@
 [tron]
     contract_recharge = false ##是否开启合约充值
     contract_address = ""   ##合约充值地址
-    address_recharge = true ##是否开启获取地址充值
+    address_recharge = false ##是否开启获取地址充值
 ##配置heco链
 [heco]
     contract_recharge = false ##是否开启合约充值
