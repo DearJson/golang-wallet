@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: gJ1ekA05EPYstdfvlSX1qhfbeFueK # 请根据需要更改密码
+      MYSQL_DATABASE: dapp-xcoin-exchange         # 默认数据库名称
+      MYSQL_USER: dapp-xcoin-exchange                 # 默认用户
+      MYSQL_PASSWORD: gJ1ekA05EPYstdfvlSX1qhfbeFueK        # 默认用户密码
+    ports:
+      - "33069:3306"                      # 将33069映射到容器内的3306端口
+    networks:
+      - app-network
+
+  rabbitmq:
+    image: rabbitmq:3.6.6
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"  # RabbitMQ 服务端口
+      - "15672:15672"  # RabbitMQ 管理界面端口
+    networks:
+      - app-network
+    environment:
+      RABBITMQ_DEFAULT_USER: guest  # 默认用户名
+      RABBITMQ_DEFAULT_PASS: guest  # 默认密码
+  redis:
+    image: redis:latest
+    container_name: redis
+    ports:
+      - "6379:6379"  # Redis 服务端口
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
