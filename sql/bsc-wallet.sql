@@ -84,6 +84,8 @@ CREATE TABLE `currency`  (
   `name` varchar(50) CHARACTER SET utf8mb3 COLLATE utf8mb3_general_ci NOT NULL COMMENT '币种名称',
   `contract_address` varchar(255) CHARACTER SET utf8mb3 COLLATE utf8mb3_general_ci NULL DEFAULT NULL COMMENT '合约地址',
   `decimals` int NOT NULL COMMENT '精度',
+  `min_withdraw` decimal(15,2) unsigned NOT NULL DEFAULT '0.00' COMMENT '最低提现金额',
+  `min_merge` decimal(15,2) unsigned NOT NULL DEFAULT '0.00' COMMENT '最低归集金额',
   `created_at` timestamp NULL DEFAULT NULL,
   `updated_at` timestamp NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`) USING BTREE
@@ -92,11 +94,11 @@ CREATE TABLE `currency`  (
 -- ----------------------------
 -- Records of currency
 -- ----------------------------
-INSERT INTO `currency` VALUES (1, 'tron', 'TRX', 'TBRop8PopYu8atWWez3g3ueVtSpseW78b6', 6, '2022-03-13 00:04:56', '2022-04-11 20:31:27');
-INSERT INTO `currency` VALUES (2, 'bsc', 'BNB', '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c', 18, '2022-03-15 18:13:31', '2022-08-23 15:22:39');
-INSERT INTO `currency` VALUES (3, 'heco', 'HT', '0x1000000000000000000000000000000000000000', 18, NULL, '2022-05-17 17:49:23');
-INSERT INTO `currency` VALUES (50, 'bsc', 'USDT', '0x55d398326f99059ff775485246999027b3197955', 18, '2022-08-03 15:59:40', '2022-08-03 15:59:40');
-INSERT INTO `currency` VALUES (100, 'eth', 'ETH', '0x1000000000000000000000000000000000000000', 6, '2022-08-03 15:59:40', '2022-08-03 15:59:40');
+INSERT INTO `currency` VALUES (1, 'tron', 'TRX', 'TBRop8PopYu8atWWez3g3ueVtSpseW78b6', 6,0,0, '2022-03-13 00:04:56', '2022-04-11 20:31:27');
+INSERT INTO `currency` VALUES (2, 'bsc', 'BNB', '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c', 18,0,0, '2022-03-15 18:13:31', '2022-08-23 15:22:39');
+INSERT INTO `currency` VALUES (3, 'heco', 'HT', '0x1000000000000000000000000000000000000000', 18,0,0, NULL, '2022-05-17 17:49:23');
+INSERT INTO `currency` VALUES (50, 'bsc', 'USDT', '0x55d398326f99059ff775485246999027b3197955', 18,0,0, '2022-08-03 15:59:40', '2022-08-03 15:59:40');
+INSERT INTO `currency` VALUES (100, 'eth', 'ETH', '0x1000000000000000000000000000000000000000', 6,0,0, '2022-08-03 15:59:40', '2022-08-03 15:59:40');
 -- ----------------------------
 -- Table structure for demo_data_auth
 -- ----------------------------

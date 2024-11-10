@@ -105,25 +105,24 @@ func (b *bsc) Withdraw(r *ghttp.Request) {
 	coinInfo, _ := service.Currency.GetInfoByContractAddress(r.GetCtx(), req.ContractAddress, "bsc")
 	if coinInfo == nil {
 		b.FailJsonExit(r, "暂未配置该币种,无法转账")
-	}
-
-	minAmount, _ := cservice.SysConfig.GetConfigByKey("sys.minWithdrawAudit")
-	if req.Amount <= gconv.Float64(minAmount.ConfigValue) {
-		req.Status = 2
 	} else {
-		req.Status = 1
+		if req.Amount <= coinInfo.MinWithdraw {
+			req.Status = 2
+		} else {
+			req.Status = 1
+		}
+		req.MainChain = "bsc"
+		req.CoinToken = coinInfo.Name
+		req.Address = strings.ToLower(req.Address)
+		rand.Seed(time.Now().UnixNano())
+		req.Nonce1 = gconv.String(rand.Int())
+		req.HashKey = library.Md5Data(req.Address, req.ContractAddress, req.Amount, req.Status, req.Nonce1)
+		err := service.Withdraw.Add(r.GetCtx(), req)
+		if err != nil {
+			b.FailJsonExit(r, err.Error())
+		}
+		b.SusJsonExit(r)
 	}
-	req.MainChain = "bsc"
-	req.CoinToken = coinInfo.Name
-	req.Address = strings.ToLower(req.Address)
-	rand.Seed(time.Now().UnixNano())
-	req.Nonce1 = gconv.String(rand.Int())
-	req.HashKey = library.Md5Data(req.Address, req.ContractAddress, req.Amount, req.Status, req.Nonce1)
-	err := service.Withdraw.Add(r.GetCtx(), req)
-	if err != nil {
-		b.FailJsonExit(r, err.Error())
-	}
-	b.SusJsonExit(r)
 }
 
 // WithdrawNft 提现NFT

@@ -16,6 +16,8 @@ type Currency struct {
 	Name            string      `orm:"name" json:"name"`                        // 币种名称
 	ContractAddress string      `orm:"contract_address" json:"contractAddress"` // 合约地址
 	Decimals        int         `orm:"decimals" json:"decimals"`                // 精度
-	CreatedAt       *gtime.Time `orm:"created_at" json:"createdAt"`             //
-	UpdatedAt       *gtime.Time `orm:"updated_at" json:"updatedAt"`             //
+	MinWithdraw     float64     `orm:"min_withdraw" json:"minWithdraw"`
+	MinMerge        float64     `orm:"min_merge" json:"minMerge"`
+	CreatedAt       *gtime.Time `orm:"created_at" json:"createdAt"` //
+	UpdatedAt       *gtime.Time `orm:"updated_at" json:"updatedAt"` //
 }

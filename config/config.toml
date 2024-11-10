@@ -58,7 +58,7 @@
         Timeout = 3600000 #1个小时
         MaxRefresh = 0
         TokenDelimiter="_"
-        EncryptKey = "koi29a83idakguqjq29asd9asd8a7jhq"
+        EncryptKey = "2ixaxamejpyrynlgznatdoytujxuot3m"
         AuthFailMsg = "登录超时，请重新登录"
         MultiLogin = true  #后台是否允许多端同时在线
 [system]

@@ -38,17 +38,21 @@ type CurrencySearchReq struct {
 
 // CurrencyAddReq 添加操作请求参数
 type CurrencyAddReq struct {
-	MainChain       string `p:"mainChain"`
-	Name            string `p:"name" v:"required#币种名称不能为空"`
-	ContractAddress string `p:"contractAddress" `
-	Decimals        int    `p:"decimals" v:"required#精度不能为空"`
+	MainChain       string  `p:"mainChain"`
+	Name            string  `p:"name" v:"required#币种名称不能为空"`
+	ContractAddress string  `p:"contractAddress" `
+	Decimals        int     `p:"decimals" v:"required#精度不能为空"`
+	MinWithdraw     float64 `json:"min_withdraw" v:"required#提现免审核数量不能为空"`
+	MinMerge        float64 `json:"min_merge" v:"required#归集最低数量不能为空"`
 }
 
 // CurrencyEditReq 修改操作请求参数
 type CurrencyEditReq struct {
-	Id              int64  `p:"id" v:"required#主键ID不能为空"`
-	MainChain       string `p:"mainChain" v:"required#主链不能为空"`
-	Name            string `p:"name" v:"required#币种名称不能为空"`
-	ContractAddress string `p:"contractAddress" `
-	Decimals        int    `p:"decimals" v:"required#精度不能为空"`
+	Id              int64   `p:"id" v:"required#主键ID不能为空"`
+	MainChain       string  `p:"mainChain" v:"required#主链不能为空"`
+	Name            string  `p:"name" v:"required#币种名称不能为空"`
+	ContractAddress string  `p:"contractAddress" `
+	Decimals        int     `p:"decimals" v:"required#精度不能为空"`
+	MinWithdraw     float64 `json:"min_withdraw" v:"required#提现免审核数量不能为空"`
+	MinMerge        float64 `json:"min_merge" v:"required#归集最低数量不能为空"`
 }
