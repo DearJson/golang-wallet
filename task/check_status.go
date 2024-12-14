@@ -13,10 +13,13 @@ import (
 	"net/url"
 )
 
-//检查
+// 检查
 func checkStatusTask() {
 	if g.Config().GetBool("bsc.contract_recharge") || g.Config().GetBool("bsc.address_recharge") {
 		bnbCheckStatus()
+	}
+	if g.Config().GetBool("eth.contract_recharge") || g.Config().GetBool("eth.address_recharge") {
+		ethCheckStatus()
 	}
 	if g.Config().GetBool("tron.contract_recharge") || g.Config().GetBool("tron.address_recharge") {
 		tronCheckStatus()
@@ -32,7 +35,7 @@ func checkStatusTask() {
 	}
 }
 
-//bnbCheckStatus 检查币安相关任务
+// bnbCheckStatus 检查币安相关任务
 func bnbCheckStatus() {
 	//查询所有待出金的任务
 	var withdrawList []*model.Withdraw
@@ -111,7 +114,86 @@ func bnbCheckStatus() {
 	}
 }
 
-//hecoCheckStatus 检查火币相关任务
+// ethCheckStatus 检查ETH相关任务
+func ethCheckStatus() {
+	//查询所有待出金的任务
+	var withdrawList []*model.Withdraw
+	g.Model("withdraw").Where("main_chain", "eth").Where("status", 3).Scan(&withdrawList)
+	client := rpc.EthClient{}
+	ethStruct := rpc.EthTransferDetail{}
+
+	for _, withdraw := range withdrawList {
+		data, err := client.Init().GetTransferStatus(withdraw.Hash)
+		//检查，如果超过两分钟未找到hash，可以判定为失败了
+		if err == nil && data == nil {
+			if gtime.Timestamp()-withdraw.UpdatedAt.Timestamp() >= 120 {
+				hashKey := library.Md5Data(withdraw.Address, withdraw.ContractAddress, withdraw.Amount, 4, withdraw.Nonce1)
+				g.Model("withdraw").Data(g.Map{"status": 4, "hashKey": hashKey}).Where("id", withdraw.Id).Update()
+			}
+		} else {
+			err = mapstructure.Decode(data, &ethStruct)
+			if err != nil || ethStruct.Status == "" {
+				continue
+			}
+			if ethStruct.Status == "0x1" {
+				g.Model("withdraw").Data(g.Map{"status": 5}).Where("id", withdraw.Id).Update()
+				if withdraw.NotifyUrl != "" {
+					data := url.Values{
+						"address":          {withdraw.Address},
+						"contract_address": {gconv.String(withdraw.ContractAddress)},
+						"amount":           {gconv.String(withdraw.Amount)},
+						"status":           {gconv.String(5)},
+						"remarks":          {withdraw.Remarks},
+						"hash":             {withdraw.Hash},
+					}
+					resp, _ := g.Client().PostForm(withdraw.NotifyUrl, data)
+					g.Log().File("callback.{Y-m-d}.log").Printf("发送提现回调请求 请求域名:【%v】 请求参数:【%v】 返回code码【%v】", withdraw.NotifyUrl, data.Encode(), resp.StatusCode)
+					resp.Body.Close()
+				}
+			} else {
+				hashKey := library.Md5Data(withdraw.Address, withdraw.ContractAddress, withdraw.Amount, 4, withdraw.Nonce1)
+				g.Model("withdraw").Data(g.Map{"status": 4, "hashKey": hashKey}).Where("id", withdraw.Id).Update()
+			}
+		}
+	}
+
+	var feeList []*model.FeeList
+	g.Model("fee_list").Where("main_chain", "eth").Where("status", 1).Scan(&feeList)
+	for _, fee := range feeList {
+		data, _ := client.Init().GetTransferStatus(fee.Hash)
+		err := mapstructure.Decode(data, &ethStruct)
+		if err != nil || ethStruct.Status == "" {
+			continue
+		}
+		if ethStruct.Status == "0x1" {
+			g.Model("fee_list").Data(g.Map{"status": 2}).Where("id", fee.Id).Update()
+			g.Model("recharge").Data(g.Map{"status": 1}).Where("id", fee.RechargeId).Update()
+		} else {
+			g.Model("fee_list").Data(g.Map{"status": 3}).Where("id", fee.Id).Update()
+		}
+	}
+
+	var rechargeList []*model.Recharge
+	g.Model("recharge").Where("main_chain", "eth").Where("status", 2).Scan(&rechargeList)
+
+	for _, recharge := range rechargeList {
+		data, _ := client.Init().GetTransferStatus(recharge.ImputationHash)
+		err := mapstructure.Decode(data, &ethStruct)
+		if err != nil || ethStruct.Status == "" {
+			continue
+		}
+		if ethStruct.Status == "0x1" {
+			g.Model("recharge").Data(g.Map{"status": 3}).Where("id", recharge.Id).Update()
+			//归集成功发送通知
+			recharge.Status = 3
+			sendNotify(recharge)
+		} else {
+			g.Model("fee_list").Data(g.Map{"status": 4}).Where("id", recharge.Id).Update()
+		}
+	}
+}
+
+// hecoCheckStatus 检查火币相关任务
 func hecoCheckStatus() {
 	//查询所有待出金的任务
 	var withdrawList []*model.Withdraw
@@ -189,7 +271,7 @@ func hecoCheckStatus() {
 	}
 }
 
-//tronCheckStatus 检查波场相关任务
+// tronCheckStatus 检查波场相关任务
 func tronCheckStatus() {
 	//查询所有待出金的任务
 	var withdrawList []*model.Withdraw
@@ -276,7 +358,7 @@ func tronCheckStatus() {
 	}
 }
 
-//nacCheckStatus 检查nac相关任务
+// nacCheckStatus 检查nac相关任务
 func nacCheckStatus() {
 	//查询所有待出金的任务
 	var withdrawList []*model.Withdraw
@@ -349,7 +431,7 @@ func nacCheckStatus() {
 	}
 }
 
-//wemixCheckStatus 检查WEMIX相关任务
+// wemixCheckStatus 检查WEMIX相关任务
 func wemixCheckStatus() {
 	//查询所有待出金的任务
 	var withdrawList []*model.Withdraw
