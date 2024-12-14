@@ -22,5 +22,5 @@ main
 tmp/*
 public/resource/pub_upload/
 data/dataBak
-./linux_amd64
-./temp
+./linux_amd64/*
+./temp/*
