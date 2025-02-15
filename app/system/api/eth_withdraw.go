@@ -67,7 +67,7 @@ func (c *ethWithdraw) AuditSuccess(r *ghttp.Request) {
 	if len(ids) <= 0 {
 		c.FailJsonExit(r, "参数错误")
 	}
-	array, _ := dao.Withdraw.Ctx(r.GetCtx()).WhereIn(dao.Withdraw.Columns.Id, ids).WhereIn(dao.Withdraw.Columns.Status, [2]int{1, 3}).Array(dao.Withdraw.Columns.Id)
+	array, _ := dao.Withdraw.Ctx(r.GetCtx()).WhereIn(dao.Withdraw.Columns.Id, ids).WhereIn(dao.Withdraw.Columns.Status, [2]int{1, 4}).Array(dao.Withdraw.Columns.Id)
 	if len(array) == 0 {
 		c.SusJsonExit(r)
 	}
