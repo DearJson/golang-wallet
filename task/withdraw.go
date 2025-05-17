@@ -37,9 +37,12 @@ func withdrawTask() {
 }
 
 func bscWithdraw() {
+	g.Log().File("withdraw.{Y-m-d}.log").Printf("开始执行提现任务")
+
 	bnbWithdrawPrivateKeyConfig, _ := service.SysConfig.GetConfigByKey("sys.bnbWithdrawAddressPrivateKey")
 	//如果未配置出金地址，退出
 	if bnbWithdrawPrivateKeyConfig.ConfigValue == "" {
+		g.Log().File("withdraw.{Y-m-d}.log").Printf("未配置出金地址私钥")
 		return
 	}
 

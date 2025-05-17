@@ -8,6 +8,13 @@ import (
 	sservice "gfast/app/system/service"
 	"gfast/library"
 	"gfast/rpc"
+	"math"
+	"math/big"
+	"net/url"
+	"os"
+	"strconv"
+	"strings"
+
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/gogf/gf/frame/g"
@@ -15,12 +22,6 @@ import (
 	"github.com/gogf/gf/util/gconv"
 	"github.com/mitchellh/mapstructure"
 	"github.com/shopspring/decimal"
-	"math"
-	"math/big"
-	"net/url"
-	"os"
-	"strconv"
-	"strings"
 )
 
 type BscSweepConsumer struct{}
@@ -513,6 +514,10 @@ func sendNotify(recharge *dao.RechargeAddReq) {
 		g.Log().File("callback.{Y-m-d}.log").Printf("未配置回调地址,不发送请求 %v \n", recharge.Hash)
 		return
 	}
+
+	// 处理 remarks 去除空字节
+	cleanRemarks := strings.ReplaceAll(recharge.Remarks, "\x00", "")
+
 	data := url.Values{
 		"main_chain":        {recharge.MainChain},
 		"block_hash":        {recharge.BlockHash},
@@ -527,7 +532,7 @@ func sendNotify(recharge *dao.RechargeAddReq) {
 		"amount1":           {gconv.String(recharge.Amount1)},
 		"hash":              {recharge.Hash},
 		"imputation_hash":   {""},
-		"remarks":           {recharge.Remarks},
+		"remarks":           {cleanRemarks},
 		"status":            {gconv.String(recharge.Status)},
 		"token_id":          {recharge.TokenId},
 		"customeUser":       {recharge.CustomeUser},

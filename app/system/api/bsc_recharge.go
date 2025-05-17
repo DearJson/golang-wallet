@@ -12,11 +12,13 @@ import (
 	"gfast/app/system/dao"
 	"gfast/app/system/model"
 	"gfast/app/system/service"
+	"net/url"
+	"strings"
+
 	"github.com/gogf/gf/frame/g"
 	"github.com/gogf/gf/net/ghttp"
 	"github.com/gogf/gf/util/gconv"
 	"github.com/gogf/gf/util/gvalid"
-	"net/url"
 )
 
 type bscRecharge struct {
@@ -75,7 +77,11 @@ func (c *bscRecharge) Callback(r *ghttp.Request) {
 		c.SusJsonExit(r)
 	}
 	data := url.Values{}
+	var cleanRemarks string
 	for _, value := range list {
+
+		// 处理 remarks 去除空字节
+		cleanRemarks = strings.ReplaceAll(value.Remarks, "\x00", "")
 		data = url.Values{
 			"main_chain":        {value.MainChain},
 			"block_hash":        {value.BlockHash},
@@ -90,7 +96,7 @@ func (c *bscRecharge) Callback(r *ghttp.Request) {
 			"amount1":           {gconv.String(value.Amount1)},
 			"hash":              {value.Hash},
 			"imputation_hash":   {value.ImputationHash},
-			"remarks":           {value.Remarks},
+			"remarks":           {cleanRemarks},
 			"status":            {gconv.String(value.Status)},
 			"token_id":          {value.TokenId},
 			"customeUser":       {value.CustomeUser},

@@ -118,7 +118,7 @@
 [tron]
     contract_recharge = false ##是否开启合约充值
     contract_address = ""   ##合约充值地址
-    address_recharge = false ##是否开启获取地址充值
+    address_recharge = true ##是否开启获取地址充值
 ##配置heco链
 [heco]
     contract_recharge = false ##是否开启合约充值
