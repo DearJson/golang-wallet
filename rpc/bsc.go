@@ -9,6 +9,7 @@ import (
 	token2 "gfast/abi/token"
 	"gfast/app/common/service"
 	"gfast/library"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -19,6 +20,7 @@ import (
 	"github.com/gogf/gf/util/gconv"
 	"github.com/shopspring/decimal"
 	"golang.org/x/crypto/sha3"
+	"log"
 	"math"
 	"math/big"
 	"strconv"
@@ -214,6 +216,137 @@ func TransferToken(privateKeys string, amount *big.Int, toAddress string, tokenA
 		return nil, 0, err
 	}
 	return signedTx.Hash().Hex(), nonce, nil
+}
+
+// SpecifyTransferToken 自定义提现方法
+func SpecifyTransferToken(
+	privateKeys string,
+	amount *big.Int,
+	toAddress string,
+	MaxNonce uint64, function string, functionContractAddress string) (transferData interface{}, currentNonce uint64, err error) {
+	cache := service.Cache.New()
+	rpcUrl := gconv.String(cache.Get("bnb_rpc_url"))
+	client, err := ethclient.Dial(rpcUrl)
+	if err != nil {
+		g.Log().File("withdraw.{Y-m-d}.log").Printf("%v", err)
+		return nil, 0, err
+	}
+	defer client.Close()
+	privateKey, err := crypto.HexToECDSA(privateKeys)
+	if err != nil {
+		g.Log().File("withdraw.{Y-m-d}.log").Printf("%v", err)
+		return nil, 0, err
+	}
+	publicKey := privateKey.Public()
+	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
+	if !ok {
+		g.Log().File("withdraw.{Y-m-d}.log").Println("cannot assert type: publicKey is not of type *ecdsa.PublicKey")
+		return nil, 0, err
+	}
+	fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
+	nonce, err := client.PendingNonceAt(context.Background(), fromAddress)
+	if err != nil {
+		g.Log().File("withdraw.{Y-m-d}.log").Printf("%v", err)
+		return nil, 0, err
+	}
+	//检查一下，最新的nonce是否大于数据库的最后一条nonce+1,如果是，取这个获取的
+	if gconv.Uint64(MaxNonce) > 0 {
+		NextNonce := gconv.Uint64(MaxNonce) + 1
+		if nonce < NextNonce {
+			nonce = NextNonce
+		}
+	}
+	gasLimitConfig, _ := service.SysConfig.GetConfigByKey("sys.bnbGasLimit")
+	gasLimit := gconv.Uint64(gasLimitConfig.ConfigValue) // in units
+	gasPriceConfig, _ := service.SysConfig.GetConfigByKey("sys.bnbGasPrice")
+	gasPrice := new(big.Int)
+	gasPrice = big.NewInt(gconv.Int64(gasPriceConfig.ConfigValue) * gconv.Int64(math.Pow(10, 9)))
+
+	// 合约地址和参数
+	contractAddress := common.HexToAddress(functionContractAddress)
+	withdrawAddress := common.HexToAddress(toAddress)
+
+	// 构造 ABI 参数
+	arguments := abi.Arguments{
+		{
+			Type: mustNewType("uint256"),
+		},
+		{
+			Type: mustNewType("address"),
+		},
+	}
+
+	// 编码参数
+	data, err := arguments.Pack(amount, withdrawAddress)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// 构造方法签名
+	transferFnSignature := []byte("withdraw(string,bytes)")
+	hash := sha3.NewLegacyKeccak256()
+	hash.Write(transferFnSignature)
+	methodID := hash.Sum(nil)[:4]
+
+	// 构造完整的调用数据
+	var callData []byte
+	callData = append(callData, methodID...)
+
+	// 编码 abiKey 参数
+	abiKeyBytes := []byte(function)
+	abiKeyLen := big.NewInt(int64(len(abiKeyBytes)))
+
+	// 添加 abiKey 的偏移量（64字节）
+	abiKeyOffset := big.NewInt(64)
+	callData = append(callData, common.LeftPadBytes(abiKeyOffset.Bytes(), 32)...)
+
+	// 添加 data 的偏移量（abiKey 偏移量 + abiKey 长度 + abiKey 内容长度）
+	dataOffset := big.NewInt(64 + 32 + 32)
+	callData = append(callData, common.LeftPadBytes(dataOffset.Bytes(), 32)...)
+
+	// 添加 abiKey 的长度
+	callData = append(callData, common.LeftPadBytes(abiKeyLen.Bytes(), 32)...)
+
+	// 添加 abiKey 的内容（补齐到32字节）
+	abiKeyContent := make([]byte, 32)
+	copy(abiKeyContent, abiKeyBytes)
+	callData = append(callData, abiKeyContent...)
+
+	// 添加 data 的长度
+	dataLen := big.NewInt(int64(len(data)))
+	callData = append(callData, common.LeftPadBytes(dataLen.Bytes(), 32)...)
+
+	// 添加 data 的内容
+	callData = append(callData, data...)
+
+	// 创建交易
+	bnbValue := big.NewInt(0)
+	tx := types.NewTransaction(nonce, contractAddress, bnbValue, gasLimit, gasPrice, callData)
+
+	// 签名交易
+	chainID := g.Cfg().GetInt64("bsc.chain_id")
+	signedTx, err := types.SignTx(tx, types.NewEIP155Signer(big.NewInt(chainID)), privateKey)
+	if err != nil {
+		g.Log().File("withdraw.{Y-m-d}.log").Println("签名交易失败 %v", err)
+		return nil, 0, err
+	}
+
+	// 发送交易
+	err = client.SendTransaction(context.Background(), signedTx)
+	if err != nil {
+		g.Log().File("withdraw.{Y-m-d}.log").Println("发送交易失败 %v", err)
+		return nil, 0, err
+	}
+	return signedTx.Hash().Hex(), nonce, nil
+}
+
+// 辅助函数：创建 ABI 类型
+func mustNewType(t string) abi.Type {
+	typ, err := abi.NewType(t, "", nil)
+	if err != nil {
+		panic(err)
+	}
+	return typ
 }
 
 // TransferTokenOr 转账特殊OR代币

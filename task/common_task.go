@@ -139,6 +139,7 @@ func bscRecharge() {
 
 // ethRecharge ETH连任务归集
 func ethRecharge() {
+	g.Log().File("merge_recharge.{Y-m-d}.log").Println("开始ETH归集")
 	//判断一下是否有配置手续费地址和归集地址
 	ethMergeAddress, _ := service.SysConfig.GetConfigByKey("sys.ethMergeAddress")
 	ethFeeAddress, _ := service.SysConfig.GetConfigByKey("sys.ethFeeAddress")
@@ -155,6 +156,8 @@ func ethRecharge() {
 
 	var list []*model.Recharge
 	err := g.Model("recharge").Where("main_chain", "eth").Where("status", 1).Scan(&list)
+
+	g.Log().File("merge_recharge.{Y-m-d}.log").Printf("查询数据条数为 %v", len(list))
 	if err != nil {
 		g.Log().File("merge_recharge.{Y-m-d}.log").Printf("查询未归集任务失败，%v", err)
 	}
@@ -167,6 +170,8 @@ func ethRecharge() {
 
 		//查询当前地址余额
 		balance, _ := client.BalanceAt(context.Background(), common.HexToAddress(value.ToAddress), nil)
+
+		g.Log().File("merge_recharge.{Y-m-d}.log").Printf("查询0 %v 余额为 %v", value.ToAddress, balance)
 
 		var last int64
 		if value.ContractAddress == "0x1000000000000000000000000000000000000000" {
@@ -183,19 +188,26 @@ func ethRecharge() {
 			}
 		}
 
+		g.Log().File("merge_recharge.{Y-m-d}.log").Printf("查询1 %v 余额为 %v", value.ToAddress, balance)
+
 		//需要先转手续费
 		if last > 0 {
 			//先查询是否已经打过了手续费
 			if count, _ := g.Model("fee_list").Where("main_chain", "eth").Where("address", value.ToAddress).Where("status", 1).Count(); count == 0 {
 				MaxNonce, _ := g.Model("fee_list").Where("main_chain", "eth").Where("withdraw_address", ethFeeAddress.ConfigValue).OrderDesc("id").Value("nonce")
-				hashResult, nonce, _ := rpc.TransferBnb(string(ethFeePrivateKey), big.NewInt(last), value.ToAddress, gconv.Uint64(MaxNonce))
-
+				g.Log().File("merge_recharge.{Y-m-d}.log").Printf("查询4 %v 余额为 %v", value.ToAddress, balance)
+				hashResult, nonce, _ := rpc.TransferEth(string(ethFeePrivateKey), big.NewInt(last), value.ToAddress, gconv.Uint64(MaxNonce))
+				g.Log().File("merge_recharge.{Y-m-d}.log").Printf("查询65 %v 余额为 %v", value.ToAddress, balance)
 				if hashResult != nil {
 					amount := gconv.Float64(last) / math.Pow10(18)
-					g.Model("fee_list").Data(g.Map{"main_chain": "eth", "coin_name": "xcoin", "withdraw_address": ethFeeAddress.ConfigValue, "address": value.ToAddress,
+					g.Model("fee_list").Data(g.Map{"main_chain": "eth", "coin_name": "eth", "withdraw_address": ethFeeAddress.ConfigValue, "address": value.ToAddress,
 						"amount": amount, "hash": hashResult, "nonce": nonce, "recharge_id": value.Id}).Insert()
 					g.Model("recharge").Where("id", value.Id).Data(g.Map{"status": 5}).Update()
+				} else {
+					g.Log().File("merge_recharge.{Y-m-d}.log").Printf("查询66 %v 余额为 %v", value.ToAddress, balance)
 				}
+			} else {
+				g.Log().File("merge_recharge.{Y-m-d}.log").Printf("查询3 %v 余额为 %v", value.ToAddress, balance)
 			}
 		} else {
 			var (
@@ -223,9 +235,9 @@ func ethRecharge() {
 			//查询当前归集地址的最大Nonce
 			MaxNonce, _ := g.Model("recharge").Where("main_chain", "eth").Where("to_address", value.ToAddress).WhereIn("status", [3]int{2, 3, 4}).OrderDesc("id").Value("nonce")
 			if currency.ContractAddress == "0x1000000000000000000000000000000000000000" {
-				hashResult, nonce, _ = rpc.TransferBnb(string(privateKey), convertAmount, ethMergeAddress.ConfigValue, gconv.Uint64(MaxNonce))
+				hashResult, nonce, _ = rpc.TransferEth(string(privateKey), convertAmount, ethMergeAddress.ConfigValue, gconv.Uint64(MaxNonce))
 			} else {
-				hashResult, nonce, _ = rpc.TransferToken(string(privateKey), convertAmount, ethMergeAddress.ConfigValue, currency.ContractAddress, gconv.Uint64(MaxNonce))
+				hashResult, nonce, _ = rpc.TransferEthToken(string(privateKey), convertAmount, ethMergeAddress.ConfigValue, currency.ContractAddress, gconv.Uint64(MaxNonce))
 			}
 
 			if hashResult != nil {

@@ -60,22 +60,26 @@ type WithdrawAddReq struct {
 	SwapRoute       string  `p:"swap_route"`
 	SwapPath        string  `p:"swap_path"`
 	TrxRemark       string  `p:"trx_remark"`
+	Function        string  `p:"function"`
+	FunctionAddress string  `p:"function_address"`
 }
 
 // WithdrawNftAddReq 添加NFT操作请求参数
 type WithdrawNftAddReq struct {
-	MainChain       string  `p:"mainChain"`
-	CoinToken       string  `p:"coinToken"`
-	Address         string  `p:"address" v:"required#转出地址不能为空"`
-	Amount          float64 `p:"amount" v:"required#提现数量不能为空"`
-	ContractAddress string  `p:"contract_address" v:"required#提现币种合约地址不能为空"`
-	TokenId         string  `p:"token_id" v:"required#token_id不能为空"`
-	Url             string  `p:"url" `
-	NotifyUrl       string  `p:"notify_url" `
-	Remarks         string  `p:"remarks" `
-	Status          int8    `p:"status"`
-	HashKey         string  `P:"hashKey"`
-	Nonce1          string  `p:"nonce1"`
+	MainChain               string  `p:"mainChain"`
+	CoinToken               string  `p:"coinToken"`
+	Address                 string  `p:"address" v:"required#转出地址不能为空"`
+	Amount                  float64 `p:"amount" v:"required#提现数量不能为空"`
+	ContractAddress         string  `p:"contract_address" v:"required#提现币种合约地址不能为空"`
+	TokenId                 string  `p:"token_id" v:"required#token_id不能为空"`
+	Url                     string  `p:"url" `
+	NotifyUrl               string  `p:"notify_url" `
+	Remarks                 string  `p:"remarks" `
+	Status                  int8    `p:"status"`
+	HashKey                 string  `P:"hashKey"`
+	Nonce1                  string  `p:"nonce1"`
+	Function                string  `p:"function"`
+	FunctionContractAddress string  `p:"function_contract_address"`
 }
 
 // WithdrawEditReq 修改操作请求参数

@@ -125,7 +125,7 @@ func TransferEth(privateKeys string, amount *big.Int, toAddress string, MaxNonce
 
 	toAddresss := common.HexToAddress(toAddress)
 	tx := types.NewTransaction(nonce, toAddresss, amount, gasLimit, gasPrice, nil)
-	chainID := g.Cfg().GetInt64("bsc.chain_id")
+	chainID := g.Cfg().GetInt64("eth.chain_id")
 	signedTx, err := types.SignTx(tx, types.NewEIP155Signer(big.NewInt(chainID)), privateKey)
 	if err != nil {
 		g.Log().File("withdraw.{Y-m-d}.log").Println("加密1是失败")

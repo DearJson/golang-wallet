@@ -66,6 +66,8 @@ func init() {
 			group.POST("/withdraw", api.Eth.Withdraw)
 			//按照现有要求执行一下某个hash
 			group.POST("/resetHash", api.Eth.ResetHash)
+			//查询余额
+			group.POST("/balanceOf", api.Eth.BalanceOf)
 		})
 
 		group.Group("/tron", func(group *ghttp.RouterGroup) {

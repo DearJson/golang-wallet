@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"io"
 )
 
 //加密过程：
@@ -16,13 +18,11 @@ import (
 
 // 16,24,32位字符串的话，分别对应AES-128，AES-192，AES-256 加密方法
 // key不能泄露
-var PwdKey = []byte("yQaSVyQ%XMjlGI#PSJlFJqxhT8XEHKE1")
+var PwdKey = []byte("Mp8HqAggL2sBrUJIV0SqUEpm1mlxJFkI")
 
 // pkcs7Padding 填充
 func pkcs7Padding(data []byte, blockSize int) []byte {
-	//判断缺少几位长度。最少1，最多 blockSize
 	padding := blockSize - len(data)%blockSize
-	//补足位数。把切片[]byte{byte(padding)}复制padding个
 	padText := bytes.Repeat([]byte{byte(padding)}, padding)
 	return append(data, padText...)
 }
@@ -31,70 +31,119 @@ func pkcs7Padding(data []byte, blockSize int) []byte {
 func pkcs7UnPadding(data []byte) ([]byte, error) {
 	length := len(data)
 	if length == 0 {
-		return nil, errors.New("加密字符串错误！")
+		return nil, errors.New("数据长度为0")
 	}
-	//获取填充的个数
+
 	unPadding := int(data[length-1])
-	return data[:(length - unPadding)], nil
+	if unPadding > aes.BlockSize || unPadding == 0 {
+		return nil, errors.New("无效的PKCS7填充")
+	}
+
+	if length < unPadding {
+		return nil, errors.New("数据长度小于填充长度")
+	}
+
+	for i := length - unPadding; i < length; i++ {
+		if data[i] != byte(unPadding) {
+			return nil, errors.New("PKCS7填充验证失败")
+		}
+	}
+
+	return data[:length-unPadding], nil
 }
 
 // AesEncrypt 加密
 func AesEncrypt(data []byte, key []byte) ([]byte, error) {
-	//创建加密实例
+	if len(data) == 0 {
+		return nil, errors.New("加密数据不能为空")
+	}
+
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return nil, err
+		return nil, errors.New("创建加密实例失败: " + err.Error())
 	}
-	//判断加密快的大小
-	blockSize := block.BlockSize()
-	//填充
-	encryptBytes := pkcs7Padding(data, blockSize)
-	//初始化加密数据接收切片
-	crypted := make([]byte, len(encryptBytes))
-	//使用cbc加密模式
-	blockMode := cipher.NewCBCEncrypter(block, key[:blockSize])
-	//执行加密
-	blockMode.CryptBlocks(crypted, encryptBytes)
-	return crypted, nil
+
+	// 创建随机IV
+	iv := make([]byte, aes.BlockSize)
+	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+		return nil, errors.New("生成IV失败: " + err.Error())
+	}
+
+	// 填充数据
+	paddedData := pkcs7Padding(data, aes.BlockSize)
+
+	// 加密数据
+	encrypted := make([]byte, len(paddedData)+aes.BlockSize) // IV + 加密数据
+	copy(encrypted[:aes.BlockSize], iv)
+
+	mode := cipher.NewCBCEncrypter(block, iv)
+	mode.CryptBlocks(encrypted[aes.BlockSize:], paddedData)
+
+	return encrypted, nil
 }
 
 // AesDecrypt 解密
 func AesDecrypt(data []byte, key []byte) ([]byte, error) {
-	//创建实例
+	if len(data) < aes.BlockSize {
+		return nil, errors.New("加密数据长度不足")
+	}
+
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return nil, err
+		return nil, errors.New("创建解密实例失败: " + err.Error())
 	}
-	//获取块的大小
-	blockSize := block.BlockSize()
-	//使用cbc
-	blockMode := cipher.NewCBCDecrypter(block, key[:blockSize])
-	//初始化解密数据接收切片
-	crypted := make([]byte, len(data))
-	//执行解密
-	blockMode.CryptBlocks(crypted, data)
-	//去除填充
-	crypted, err = pkcs7UnPadding(crypted)
-	if err != nil {
-		return nil, err
+
+	// 提取IV
+	iv := data[:aes.BlockSize]
+	data = data[aes.BlockSize:]
+
+	if len(data)%aes.BlockSize != 0 {
+		return nil, errors.New("加密数据长度不是块大小的整数倍")
 	}
-	return crypted, nil
+
+	mode := cipher.NewCBCDecrypter(block, iv)
+	decrypted := make([]byte, len(data))
+	mode.CryptBlocks(decrypted, data)
+
+	return pkcs7UnPadding(decrypted)
 }
 
-// EncryptByAes Aes加密 后 base64 再加
+// EncryptByAes Aes加密后base64编码
 func EncryptByAes(data []byte) (string, error) {
-	res, err := AesEncrypt(data, PwdKey)
+	if len(data) == 0 {
+		return "", errors.New("加密数据不能为空")
+	}
+
+	encrypted, err := AesEncrypt(data, PwdKey)
 	if err != nil {
 		return "", err
 	}
-	return base64.StdEncoding.EncodeToString(res), nil
+
+	return base64.StdEncoding.EncodeToString(encrypted), nil
 }
 
-// DecryptByAes Aes 解密
+// DecryptByAes Aes解密
 func DecryptByAes(data string) ([]byte, error) {
-	dataByte, err := base64.StdEncoding.DecodeString(data)
+	if data == "" {
+		return nil, errors.New("解密数据不能为空")
+	}
+
+	// Base64解码
+	encrypted, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		return nil, errors.New("Base64解码失败: " + err.Error())
+	}
+
+	if len(encrypted) < aes.BlockSize {
+		return nil, errors.New("解密数据长度不足")
+	}
+
+	decrypted, err := AesDecrypt(encrypted, PwdKey)
 	if err != nil {
 		return nil, err
 	}
-	return AesDecrypt(dataByte, PwdKey)
+
+	// 去除末尾的空字符和%字符
+	decrypted = bytes.TrimRight(decrypted, "\x00%")
+	return decrypted, nil
 }

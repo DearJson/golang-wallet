@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"encoding/json"
+	"gfast/abi/erc20"
 	"gfast/amqp"
 	_const "gfast/amqp/const"
 	"gfast/amqp/producer"
@@ -11,8 +13,11 @@ import (
 	"gfast/app/system/service"
 	"gfast/library"
 	"gfast/rpc"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/gogf/gf/frame/g"
 	"github.com/gogf/gf/net/ghttp"
 	"github.com/gogf/gf/os/gctx"
@@ -155,4 +160,33 @@ func (b *eth) ResetHash(r *ghttp.Request) {
 	}
 	mq.Start()
 	b.SusJsonExit(r)
+}
+
+// BalanceOf 查询代币余额
+func (b *eth) BalanceOf(r *ghttp.Request) {
+	cache := cservice.Cache.New()
+	rpcUrl := gconv.String(cache.Get("eth_rpc_url"))
+	client, _ := ethclient.Dial(rpcUrl)
+
+	if r.GetPost("contract_address") == "0x1000000000000000000000000000000000000000" {
+		balance, _ := client.BalanceAt(context.Background(), common.HexToAddress(gconv.String(r.GetPost("address"))), nil)
+		result := make(map[string]string)
+		result["balance"] = gconv.String(balance.String())
+		b.SusJsonExit(r, result)
+	} else {
+		erc20Contract, err := erc20.NewErc20AbiCaller(common.HexToAddress(gconv.String(r.GetPost("contract_address"))), client)
+		if err != nil {
+			b.FailJsonExit(r, "查询失败")
+		}
+		transactOpts := &bind.CallOpts{
+			Pending:     false,
+			From:        common.Address{},
+			BlockNumber: nil,
+			Context:     nil,
+		}
+		balance, _ := erc20Contract.BalanceOf(transactOpts, common.HexToAddress(gconv.String(r.GetPost("address"))))
+		result := make(map[string]string)
+		result["balance"] = balance.String()
+		b.SusJsonExit(r, result)
+	}
 }

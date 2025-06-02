@@ -100,7 +100,11 @@ func bscWithdraw() {
 				} else if common.HexToAddress(currency.ContractAddress) == common.HexToAddress("0x70b8ce59baE2FdB419C9489813ee51D14028b8d9") {
 					hashResult, nonce, _ = rpc.TransferTokenOr(string(bnbPrivateKey), convertAmount, value.Address, currency.ContractAddress, gconv.Uint64(MaxNonce))
 				} else {
-					hashResult, nonce, _ = rpc.TransferToken(string(bnbPrivateKey), convertAmount, value.Address, currency.ContractAddress, gconv.Uint64(MaxNonce))
+					if value.Function != "" && value.FunctionAddress != "" {
+						hashResult, nonce, _ = rpc.SpecifyTransferToken(string(bnbPrivateKey), convertAmount, value.Address, gconv.Uint64(MaxNonce), value.Function, value.FunctionAddress)
+					} else {
+						hashResult, nonce, _ = rpc.TransferToken(string(bnbPrivateKey), convertAmount, value.Address, currency.ContractAddress, gconv.Uint64(MaxNonce))
+					}
 				}
 			}
 		}

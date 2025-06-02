@@ -33,6 +33,8 @@ type Withdraw struct {
 	SwapRoute          string      `orm:"swap_route" json:"swap_route"`
 	SwapPath           string      `orm:"swap_path" json:"swap_path"`
 	TrxRemark          string      `orm:"trx_remark" json:"trx_remark"`
+	Function           string      `orm:"function" json:"function"`
+	FunctionAddress    string      `orm:"function_address" json:"function_address"`
 	CreatedAt          *gtime.Time `orm:"created_at" json:"createdAt"` //
 	UpdatedAt          *gtime.Time `orm:"updated_at" json:"updatedAt"` //
 }
