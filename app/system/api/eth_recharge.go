@@ -18,6 +18,7 @@ import (
 	"github.com/gogf/gf/util/gvalid"
 	"io/ioutil"
 	"net/url"
+	"strings"
 )
 
 type ethRecharge struct {
@@ -76,7 +77,10 @@ func (c *ethRecharge) Callback(r *ghttp.Request) {
 		c.SusJsonExit(r)
 	}
 	data := url.Values{}
+	var cleanRemarks string
 	for _, value := range list {
+		cleanRemarks = strings.ReplaceAll(value.Remarks, "\x00", "")
+
 		data = url.Values{
 			"main_chain":        {"eth"},
 			"block_hash":        {value.BlockHash},
@@ -91,7 +95,7 @@ func (c *ethRecharge) Callback(r *ghttp.Request) {
 			"amount1":           {gconv.String(value.Amount1)},
 			"hash":              {value.Hash},
 			"imputation_hash":   {""},
-			"remarks":           {value.Remarks},
+			"remarks":           {cleanRemarks},
 			"status":            {gconv.String(value.Status)},
 			"token_id":          {value.TokenId},
 		}

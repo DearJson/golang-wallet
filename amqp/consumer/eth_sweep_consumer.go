@@ -426,6 +426,9 @@ func sendEthNotify(recharge *dao.RechargeAddReq) {
 		g.Log().File("callback.{Y-m-d}.log").Printf("未配置回调地址,不发送请求 %v \n", recharge.Hash)
 		return
 	}
+	// 处理 remarks 去除空字节
+	cleanRemarks := strings.ReplaceAll(recharge.Remarks, "\x00", "")
+
 	data := url.Values{
 		"main_chain":        {recharge.MainChain},
 		"block_hash":        {recharge.BlockHash},
@@ -440,7 +443,7 @@ func sendEthNotify(recharge *dao.RechargeAddReq) {
 		"amount1":           {gconv.String(recharge.Amount1)},
 		"hash":              {recharge.Hash},
 		"imputation_hash":   {""},
-		"remarks":           {recharge.Remarks},
+		"remarks":           {cleanRemarks},
 		"status":            {gconv.String(recharge.Status)},
 		"token_id":          {recharge.TokenId},
 	}
