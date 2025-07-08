@@ -371,7 +371,8 @@ func addressRechargeEthHandle(transfer *rpc.EthTransactions) (err error) {
 		if amountString == "0x" {
 			return nil
 		}
-		amount = decimal.NewFromBigInt(library.HexToBigInt(amountString), 0).DivRound(decimal.NewFromFloat(math.Pow(10, float64(coinAddress[contractAddress].Decimals))), int32(coinAddress[contractAddress].Decimals)).String()
+		//amount = decimal.NewFromBigInt(library.HexToBigInt(amountString), 0).DivRound(decimal.NewFromFloat(math.Pow(10, float64(coinAddress[contractAddress].Decimals))), int32(coinAddress[contractAddress].Decimals)).String()
+		amount = decimal.NewFromBigInt(library.HexToBigInt(amountString), int32(-(coinAddress[contractAddress].Decimals))).Truncate(int32(coinAddress[contractAddress].Decimals)).String()
 	} else {
 		toAddress = transfer.To
 		//检查交易状态
@@ -393,8 +394,8 @@ func addressRechargeEthHandle(transfer *rpc.EthTransactions) (err error) {
 		}
 		coinToken = "ETH"
 		amountString := transfer.Value
-
-		amount = decimal.NewFromBigInt(library.HexToBigInt(amountString), 0).DivRound(decimal.NewFromFloat(math.Pow(10, float64(coinAddress[contractAddress].Decimals))), int32(coinAddress[contractAddress].Decimals)).Truncate(int32(coinAddress[contractAddress].Decimals)).String()
+		amount = decimal.NewFromBigInt(library.HexToBigInt(amountString), int32(-(coinAddress[contractAddress].Decimals))).Truncate(int32(coinAddress[contractAddress].Decimals)).String()
+		//amount = decimal.NewFromBigInt(library.HexToBigInt(amountString), 0).DivRound(decimal.NewFromFloat(math.Pow(10, float64(coinAddress[contractAddress].Decimals))), int32(coinAddress[contractAddress].Decimals)).Truncate(int32(coinAddress[contractAddress].Decimals)).String()
 	}
 	status = 1
 	rechargeType = 1

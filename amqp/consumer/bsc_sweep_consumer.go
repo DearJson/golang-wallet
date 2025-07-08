@@ -457,9 +457,10 @@ func addressRechargeHandle(transfer *rpc.BscTransactions) (err error) {
 		if amountString == "0x" {
 			return nil
 		}
-		amount = decimal.NewFromBigInt(library.HexToBigInt(amountString), 0).Div(decimal.NewFromFloat(math.Pow(10, float64(coinAddress[contractAddress].Decimals)))).RoundFloor(int32(coinAddress[contractAddress].Decimals)).String()
+		//amount = decimal.NewFromBigInt(library.HexToBigInt(amountString), 0).Div(decimal.NewFromFloat(math.Pow(10, float64(coinAddress[contractAddress].Decimals)))).RoundFloor(int32(coinAddress[contractAddress].Decimals)).String()
 		//dapp-sus
 		//amount = decimal.NewFromBigInt(library.HexToBigInt(amountString), 0).DivRound(decimal.NewFromFloat(math.Pow(10, 18)), 18).Mul(decimal.NewFromFloat32(0.97)).Truncate(18).String()
+		amount = decimal.NewFromBigInt(library.HexToBigInt(amountString), int32(-(coinAddress[contractAddress].Decimals))).Truncate(int32(coinAddress[contractAddress].Decimals)).String()
 	} else {
 		toAddress = transfer.To
 		//检查交易状态
@@ -481,8 +482,7 @@ func addressRechargeHandle(transfer *rpc.BscTransactions) (err error) {
 		}
 		coinToken = "BNB"
 		amountString := transfer.Value
-
-		amount = decimal.NewFromBigInt(library.HexToBigInt(amountString), 0).DivRound(decimal.NewFromFloat(math.Pow(10, float64(coinAddress[contractAddress].Decimals))), 18).Truncate(18).String()
+		amount = decimal.NewFromBigInt(library.HexToBigInt(amountString), int32(-(coinAddress[contractAddress].Decimals))).Truncate(int32(coinAddress[contractAddress].Decimals)).String()
 	}
 	status = 1
 	rechargeType = 1
