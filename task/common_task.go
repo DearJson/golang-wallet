@@ -7,14 +7,14 @@ import (
 	"gfast/app/system/model"
 	"gfast/library"
 	"gfast/rpc"
+	"math"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/fbsobreira/gotron-sdk/pkg/proto/core"
 	"github.com/gogf/gf/frame/g"
 	"github.com/gogf/gf/util/gconv"
 	"github.com/shopspring/decimal"
-	"math"
-	"math/big"
 )
 
 // 归集任务
@@ -63,37 +63,42 @@ func bscRecharge() {
 	cache := service.Cache.New()
 	rpcUrl := gconv.String(cache.Get("bnb_rpc_url"))
 	client, _ := ethclient.Dial(rpcUrl)
-	minFee := gconv.Int64(bnbGasPrice.ConfigValue) * gconv.Int64(math.Pow10(9)) * gconv.Int64(bnbGasLimit.ConfigValue)
+	minFeeInt := gconv.Int64(bnbGasPrice.ConfigValue) * gconv.Int64(math.Pow10(9)) * gconv.Int64(bnbGasLimit.ConfigValue)
+	minFee := decimal.NewFromInt(minFeeInt)
 
 	for _, value := range list {
 
 		//查询当前地址余额
-		balance, _ := client.BalanceAt(context.Background(), common.HexToAddress(value.ToAddress), nil)
+		balanceWei, _ := client.BalanceAt(context.Background(), common.HexToAddress(value.ToAddress), nil)
+		balance := decimal.NewFromBigInt(balanceWei, 0)
 
-		var last int64
+		var last decimal.Decimal
 		if value.ContractAddress == "0x1000000000000000000000000000000000000000" {
-			if balance.Int64()-minFee-gconv.Int64(gconv.Float64(value.Amount)*math.Pow10(18)) < 0 {
-				last = balance.Int64() + minFee - gconv.Int64(gconv.Float64(value.Amount)*math.Pow10(18))
+			amount, _ := decimal.NewFromString(value.Amount)
+			amountWei := amount.Mul(decimal.NewFromInt(int64(math.Pow10(18))))
+
+			if balance.Sub(minFee).Sub(amountWei).IsNegative() {
+				last = minFee.Add(amountWei).Sub(balance)
 			} else {
-				last = 0
+				last = decimal.Zero
 			}
 		} else {
-			if balance.Int64()-minFee < 0 {
-				last = minFee - balance.Int64()
+			if balance.Sub(minFee).IsNegative() {
+				last = minFee.Sub(balance)
 			} else {
-				last = 0
+				last = decimal.Zero
 			}
 		}
 
 		//需要先转手续费
-		if last > 0 {
+		if last.IsPositive() {
 			//先查询是否已经打过了手续费
 			if count, _ := g.Model("fee_list").Where("main_chain", "bsc").Where("address", value.ToAddress).Where("status", 1).Count(); count == 0 {
 				MaxNonce, _ := g.Model("fee_list").Where("main_chain", "bsc").Where("withdraw_address", bnbFeeAddress.ConfigValue).OrderDesc("id").Value("nonce")
-				hashResult, nonce, _ := rpc.TransferBnb(string(bnbFeePrivateKey), big.NewInt(last), value.ToAddress, gconv.Uint64(MaxNonce))
+				hashResult, nonce, _ := rpc.TransferBnb(string(bnbFeePrivateKey), last.BigInt(), value.ToAddress, gconv.Uint64(MaxNonce))
 
 				if hashResult != nil {
-					amount := gconv.Float64(last) / math.Pow10(18)
+					amount, _ := last.Div(decimal.NewFromInt(int64(math.Pow10(18)))).Float64()
 					g.Model("fee_list").Data(g.Map{"main_chain": "bsc", "coin_name": "bnb", "withdraw_address": bnbFeeAddress.ConfigValue, "address": value.ToAddress,
 						"amount": amount, "hash": hashResult, "nonce": nonce, "recharge_id": value.Id}).Insert()
 					g.Model("recharge").Where("id", value.Id).Data(g.Map{"status": 5}).Update()
@@ -164,42 +169,47 @@ func ethRecharge() {
 	cache := service.Cache.New()
 	rpcUrl := gconv.String(cache.Get("eth_rpc_url"))
 	client, _ := ethclient.Dial(rpcUrl)
-	minFee := gconv.Int64(ethGasPrice.ConfigValue) * gconv.Int64(math.Pow10(9)) * gconv.Int64(ethGasLimit.ConfigValue)
+	minFeeInt := gconv.Int64(ethGasPrice.ConfigValue) * gconv.Int64(math.Pow10(9)) * gconv.Int64(ethGasLimit.ConfigValue)
+	minFee := decimal.NewFromInt(minFeeInt)
 
 	for _, value := range list {
 
 		//查询当前地址余额
-		balance, _ := client.BalanceAt(context.Background(), common.HexToAddress(value.ToAddress), nil)
+		balanceWei, _ := client.BalanceAt(context.Background(), common.HexToAddress(value.ToAddress), nil)
+		balance := decimal.NewFromBigInt(balanceWei, 0)
 
 		g.Log().File("merge_recharge.{Y-m-d}.log").Printf("查询0 %v 余额为 %v", value.ToAddress, balance)
 
-		var last int64
+		var last decimal.Decimal
 		if value.ContractAddress == "0x1000000000000000000000000000000000000000" {
-			if balance.Int64()-minFee-gconv.Int64(gconv.Float64(value.Amount)*math.Pow10(18)) < 0 {
-				last = balance.Int64() + minFee - gconv.Int64(gconv.Float64(value.Amount)*math.Pow10(18))
+			amount, _ := decimal.NewFromString(value.Amount)
+			amountWei := amount.Mul(decimal.NewFromInt(int64(math.Pow10(18))))
+
+			if balance.Sub(minFee).Sub(amountWei).IsNegative() {
+				last = minFee.Add(amountWei).Sub(balance)
 			} else {
-				last = 0
+				last = decimal.Zero
 			}
 		} else {
-			if balance.Int64()-minFee < 0 {
-				last = minFee - balance.Int64()
+			if balance.Sub(minFee).IsNegative() {
+				last = minFee.Sub(balance)
 			} else {
-				last = 0
+				last = decimal.Zero
 			}
 		}
 
 		g.Log().File("merge_recharge.{Y-m-d}.log").Printf("查询1 %v 余额为 %v", value.ToAddress, balance)
 
 		//需要先转手续费
-		if last > 0 {
+		if last.IsPositive() {
 			//先查询是否已经打过了手续费
 			if count, _ := g.Model("fee_list").Where("main_chain", "eth").Where("address", value.ToAddress).Where("status", 1).Count(); count == 0 {
 				MaxNonce, _ := g.Model("fee_list").Where("main_chain", "eth").Where("withdraw_address", ethFeeAddress.ConfigValue).OrderDesc("id").Value("nonce")
 				g.Log().File("merge_recharge.{Y-m-d}.log").Printf("查询4 %v 余额为 %v", value.ToAddress, balance)
-				hashResult, nonce, _ := rpc.TransferEth(string(ethFeePrivateKey), big.NewInt(last), value.ToAddress, gconv.Uint64(MaxNonce))
+				hashResult, nonce, _ := rpc.TransferEth(string(ethFeePrivateKey), last.BigInt(), value.ToAddress, gconv.Uint64(MaxNonce))
 				g.Log().File("merge_recharge.{Y-m-d}.log").Printf("查询65 %v 余额为 %v", value.ToAddress, balance)
 				if hashResult != nil {
-					amount := gconv.Float64(last) / math.Pow10(18)
+					amount, _ := last.Div(decimal.NewFromInt(int64(math.Pow10(18)))).Float64()
 					g.Model("fee_list").Data(g.Map{"main_chain": "eth", "coin_name": "eth", "withdraw_address": ethFeeAddress.ConfigValue, "address": value.ToAddress,
 						"amount": amount, "hash": hashResult, "nonce": nonce, "recharge_id": value.Id}).Insert()
 					g.Model("recharge").Where("id", value.Id).Data(g.Map{"status": 5}).Update()
@@ -271,37 +281,42 @@ func hecoRecharge() {
 	cache := service.Cache.New()
 	rpcUrl := gconv.String(cache.Get("heco_rpc_url"))
 	client, _ := ethclient.Dial(rpcUrl)
-	minFee := gconv.Int64(hecoGasPrice.ConfigValue) * gconv.Int64(math.Pow10(9)) * gconv.Int64(hecoGasLimit.ConfigValue)
+	minFeeInt := gconv.Int64(hecoGasPrice.ConfigValue) * gconv.Int64(math.Pow10(9)) * gconv.Int64(hecoGasLimit.ConfigValue)
+	minFee := decimal.NewFromInt(minFeeInt)
 
 	for _, value := range list {
 
 		//查询当前地址余额
-		balance, _ := client.BalanceAt(context.Background(), common.HexToAddress(value.ToAddress), nil)
+		balanceWei, _ := client.BalanceAt(context.Background(), common.HexToAddress(value.ToAddress), nil)
+		balance := decimal.NewFromBigInt(balanceWei, 0)
 
-		var last int64
+		var last decimal.Decimal
 		if value.ContractAddress == "0x1000000000000000000000000000000000000000" {
-			if balance.Int64()-minFee-gconv.Int64(gconv.Float64(value.Amount)*math.Pow10(18)) < 0 {
-				last = balance.Int64() + minFee - gconv.Int64(gconv.Float64(value.Amount)*math.Pow10(18))
+			amount, _ := decimal.NewFromString(value.Amount)
+			amountWei := amount.Mul(decimal.NewFromInt(int64(math.Pow10(18))))
+
+			if balance.Sub(minFee).Sub(amountWei).IsNegative() {
+				last = minFee.Add(amountWei).Sub(balance)
 			} else {
-				last = 0
+				last = decimal.Zero
 			}
 		} else {
-			if balance.Int64()-minFee < 0 {
-				last = minFee - balance.Int64()
+			if balance.Sub(minFee).IsNegative() {
+				last = minFee.Sub(balance)
 			} else {
-				last = 0
+				last = decimal.Zero
 			}
 		}
 
 		//需要先转手续费
-		if last > 0 {
+		if last.IsPositive() {
 			//先查询是否已经打过了手续费
 			if count, _ := g.Model("fee_list").Where("main_chain", "heco").Where("address", value.ToAddress).Where("status", 1).Count(); count == 0 {
 				MaxNonce, _ := g.Model("fee_list").Where("main_chain", "heco").Where("withdraw_address", hecoFeeAddress.ConfigValue).OrderDesc("id").Value("nonce")
-				hashResult, nonce, _ := rpc.HecoTransferHt(string(bnbFeePrivateKey), big.NewInt(last), value.ToAddress, gconv.Uint64(MaxNonce))
+				hashResult, nonce, _ := rpc.HecoTransferHt(string(bnbFeePrivateKey), last.BigInt(), value.ToAddress, gconv.Uint64(MaxNonce))
 
 				if hashResult != nil {
-					amount := gconv.Float64(last) / math.Pow10(18)
+					amount, _ := last.Div(decimal.NewFromInt(int64(math.Pow10(18)))).Float64()
 					g.Model("fee_list").Data(g.Map{"main_chain": "heco", "coin_name": "HT", "withdraw_address": hecoFeeAddress.ConfigValue, "address": value.ToAddress,
 						"amount": amount, "hash": hashResult, "nonce": nonce, "recharge_id": value.Id}).Insert()
 					g.Model("recharge").Where("id", value.Id).Data(g.Map{"status": 5}).Update()
@@ -491,7 +506,7 @@ func nacRecharge() {
 		if value.ContractAddress == "1" {
 			can, _ := balance.Sub(minFee).Sub(amount).Float64()
 			if can < 0 {
-				last, _ = balance.Add(minFee).Sub(amount).Float64()
+				last, _ = minFee.Add(amount).Sub(balance).Float64()
 			} else {
 				last = 0
 			}
@@ -554,37 +569,42 @@ func wemixRecharge() {
 	cache := service.Cache.New()
 	rpcUrl := gconv.String(cache.Get("wemix_rpc_url"))
 	client, _ := ethclient.Dial(rpcUrl)
-	minFee := gconv.Int64(wemixGasPrice.ConfigValue) * gconv.Int64(math.Pow10(9)) * gconv.Int64(wemixGasLimit.ConfigValue)
+	minFeeInt := gconv.Int64(wemixGasPrice.ConfigValue) * gconv.Int64(math.Pow10(9)) * gconv.Int64(wemixGasLimit.ConfigValue)
+	minFee := decimal.NewFromInt(minFeeInt)
 
 	for _, value := range list {
 
 		//查询当前地址余额
-		balance, _ := client.BalanceAt(context.Background(), common.HexToAddress(value.ToAddress), nil)
+		balanceWei, _ := client.BalanceAt(context.Background(), common.HexToAddress(value.ToAddress), nil)
+		balance := decimal.NewFromBigInt(balanceWei, 0)
 
-		var last int64
+		var last decimal.Decimal
 		if value.ContractAddress == "0x1000000000000000000000000000000000000000" {
-			if balance.Int64()-minFee-gconv.Int64(gconv.Float64(value.Amount)*math.Pow10(18)) < 0 {
-				last = balance.Int64() + minFee - gconv.Int64(gconv.Float64(value.Amount)*math.Pow10(18))
+			amount, _ := decimal.NewFromString(value.Amount)
+			amountWei := amount.Mul(decimal.NewFromInt(int64(math.Pow10(18))))
+
+			if balance.Sub(minFee).Sub(amountWei).IsNegative() {
+				last = minFee.Add(amountWei).Sub(balance)
 			} else {
-				last = 0
+				last = decimal.Zero
 			}
 		} else {
-			if balance.Int64()-minFee < 0 {
-				last = minFee - balance.Int64()
+			if balance.Sub(minFee).IsNegative() {
+				last = minFee.Sub(balance)
 			} else {
-				last = 0
+				last = decimal.Zero
 			}
 		}
 
 		//需要先转手续费
-		if last > 0 {
+		if last.IsPositive() {
 			//先查询是否已经打过了手续费
 			if count, _ := g.Model("fee_list").Where("main_chain", "wemix").Where("address", value.ToAddress).Where("status", 1).Count(); count == 0 {
 				MaxNonce, _ := g.Model("fee_list").Where("main_chain", "wemix").Where("withdraw_address", wemixFeeAddress.ConfigValue).OrderDesc("id").Value("nonce")
-				hashResult, nonce, _ := rpc.WemixTransferWemix(string(bnbFeePrivateKey), big.NewInt(last), value.ToAddress, gconv.Uint64(MaxNonce))
+				hashResult, nonce, _ := rpc.WemixTransferWemix(string(bnbFeePrivateKey), last.BigInt(), value.ToAddress, gconv.Uint64(MaxNonce))
 
 				if hashResult != nil {
-					amount := gconv.Float64(last) / math.Pow10(18)
+					amount, _ := last.Div(decimal.NewFromInt(int64(math.Pow10(18)))).Float64()
 					g.Model("fee_list").Data(g.Map{"main_chain": "wemix", "coin_name": "WEMIX", "withdraw_address": wemixFeeAddress.ConfigValue, "address": value.ToAddress,
 						"amount": amount, "hash": hashResult, "nonce": nonce, "recharge_id": value.Id}).Insert()
 					g.Model("recharge").Where("id", value.Id).Data(g.Map{"status": 5}).Update()
