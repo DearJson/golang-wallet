@@ -1,0 +1,123 @@
+# Docker环境专用配置文件
+# 此配置会覆盖默认config.toml中的设置
+
+# HTTP Server
+[server]
+    Address     = ":9090"
+    ServerRoot  = "./public/resource"
+    ServerAgent = "钱包管理系统-Docker版"
+    LogPath     = "./logs"
+    logStdout           = true
+    errorStack          = true
+    errorLogPattern     = "error-{Ymd}.log"
+    accessLogPattern    = "access-{Ymd}.log"
+    DumpRouterMap    = false
+    NameToUriType = 3
+    maxHeaderBytes    = "20KB"
+    clientMaxBodySize = "200MB"
+    accessLogEnabled    = true
+    errorLogEnabled     = true
+    PProfEnabled     = false               # 生产环境关闭性能调试
+    debug               = false             # 生产环境关闭调试模式
+    readTimeout         = "180s"
+
+# Logger - Docker环境优化
+[logger]
+    Path        = "./logs"
+    Level       = "info"                   # 生产环境只记录info及以上级别
+    Stdout      = true
+    RotateSize  = 10                       # 10MB轮转
+    RotateCount = 5                        # 保留5个文件
+
+# Database - Docker内部网络
+[database]
+    link  = "mysql:wallet:${MYSQL_PASSWORD}@tcp(mysql:3306)/wallet"
+    charset   = "utf8mb4"
+    debug = false
+    dryRun = false
+    maxIdle      = "10"
+    maxOpen     = "20"                     # 增加连接池
+    maxLifetime  = "300"                   # 5分钟
+    [database.logger]
+        Path   = "./logs/sql"
+        Level  = "error"                   # 只记录错误级别SQL日志
+        Stdout = false
+
+# Redis - Docker内部网络
+[redis]
+    open = true
+    default = "redis:6379,0?password=${REDIS_PASSWORD}&idleTimeout=20&maxActive=100"
+
+# JWT配置 - 生产环境安全配置
+[gToken]
+    [gToken.system]
+        CacheMode = 2
+        CacheKey = "GToken:"
+        Timeout = 7200000                  # 2小时
+        MaxRefresh = 0
+        TokenDelimiter="_"
+        EncryptKey = "${JWT_SECRET}"       # 从环境变量读取
+        AuthFailMsg = "登录超时，请重新登录"
+        MultiLogin = false                 # 生产环境禁止多端登录
+
+[system]
+    notCheckAuthAdminIds = [1]
+    dataDir = "./data"
+
+# Casbin配置
+[casbin]
+    modelFile="./config/casbin_conf/rbac_model.conf"
+    policyFile="./config/casbin_conf/rbac_policy.csv"
+
+# 上传配置 - Docker环境
+[upload]
+    type = "local"
+    [upload.local]
+        UpPath = "/app/data/uploads/"
+
+# RabbitMQ - Docker内部网络
+[rabbitmq]
+    host = "rabbitmq"
+    port = "5672"
+    user = "${RABBITMQ_USER}"
+    password = "${RABBITMQ_PASSWORD}"
+    vhost = "/"
+
+# 谷歌验证码
+[googleAuth]
+    open = false
+    secret = "${GOOGLE_AUTH_SECRET}"
+
+# 区块链配置 - Docker环境
+[bsc]
+    contract_recharge = false
+    contract_address = ""
+    address_recharge = true
+    chain_id = 56
+    common_recharge = "0xE1C0d3D4690Bf7BD64F97193C64b3C6Ec5BbBB87"
+
+[tron]
+    contract_recharge = false
+    contract_address = ""
+    address_recharge = false
+
+[heco]
+    contract_recharge = false
+    contract_address = "0x6d3a964894c8d31e0f0358db4c980f0db93c2a5d"
+    address_recharge = false
+    chain_id = 128
+
+[nac]
+    address_recharge = false
+
+[wemix]
+    contract_recharge = false
+    contract_address = ""
+    address_recharge = false
+    chain_id = 1112
+
+[eth]
+    contract_recharge = false
+    contract_address = ""
+    address_recharge = false
+    chain_id = 1 

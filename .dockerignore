@@ -1,0 +1,98 @@
+# ===========================================
+# Docker忽略文件 - 优化构建速度和安全性
+# ===========================================
+
+# 版本控制
+.git
+.gitignore
+
+# 文档和说明
+README.md
+*.md
+docs/
+document/
+
+# 开发工具
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 日志文件
+logs/
+*.log
+data/log/
+
+# 临时文件
+tmp/
+temp/
+.tmp/
+
+# 编译产物和缓存
+bin/
+linux_amd64/
+*.exe
+*.out
+go.work
+go.work.sum
+
+# 测试文件
+*_test.go
+test.txt
+test*.go
+
+# 配置文件（敏感信息）
+.env
+docker.env
+*.env.local
+*.env.production
+
+# 数据库文件
+*.sql
+*.db
+*.sqlite
+
+# Docker相关
+Dockerfile
+docker-compose.yml
+docker-compose.*.yml
+build.sh
+
+# 部署相关
+deploy/
+k8s/
+helm/
+
+# IDE和编辑器
+.DS_Store
+Thumbs.db
+
+# 运行时数据
+data/
+uploads/
+storage/
+
+# 包管理器
+vendor/
+node_modules/
+
+# 证书和密钥
+*.pem
+*.key
+*.crt
+*.p12
+
+# 备份文件
+*.bak
+*.backup
+*~
+
+# 压缩文件
+*.tar
+*.tar.gz
+*.zip
+*.rar
+
+# 其他
+.dockerignore 
