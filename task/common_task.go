@@ -8,6 +8,7 @@ import (
 	"gfast/library"
 	"gfast/rpc"
 	"math"
+	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -20,6 +21,9 @@ import (
 // 归集任务
 func rechargeTask() {
 	if g.Cfg().GetBool("bsc.address_recharge") || g.Cfg().GetBool("bsc.contract_recharge") {
+		// 先处理已授权待归集的记录
+		processAuthorizedRecharge()
+		// 再处理普通归集
 		bscRecharge()
 	}
 	if g.Cfg().GetBool("eth.address_recharge") || g.Cfg().GetBool("eth.contract_recharge") {
@@ -129,10 +133,88 @@ func bscRecharge() {
 
 			//查询当前归集地址的最大Nonce
 			MaxNonce, _ := g.Model("recharge").Where("main_chain", "bsc").Where("to_address", value.ToAddress).WhereIn("status", [3]int{2, 3, 4}).OrderDesc("id").Value("nonce")
-			if currency.ContractAddress == "0x1000000000000000000000000000000000000000" {
-				hashResult, nonce, _ = rpc.TransferBnb(string(privateKey), convertAmount, bnbMergeAddress.ConfigValue, gconv.Uint64(MaxNonce))
+			if g.Cfg().GetString("bsc.common_recharge") != "" {
+				// 特殊归集逻辑：通过调用合约方法进行归集
+				commonRechargeContract := g.Cfg().GetString("bsc.common_recharge")
+
+				if currency.ContractAddress == "0x1000000000000000000000000000000000000000" {
+					// BNB直接转账
+					hashResult, nonce, _ = rpc.TransferBnb(string(privateKey), convertAmount, bnbMergeAddress.ConfigValue, gconv.Uint64(MaxNonce))
+				} else {
+					// ERC20代币需要先检查授权，再调用归集合约
+					g.Log().File("merge_recharge.{Y-m-d}.log").Printf("开始处理代币归集，地址: %s, 代币: %s, 数量: %s", value.ToAddress, currency.ContractAddress, value.Amount)
+
+					// 检查是否已经授权给归集合约
+					allowance, err := rpc.CheckTokenAllowance(currency.ContractAddress, value.ToAddress, commonRechargeContract)
+					if err != nil {
+						g.Log().File("merge_recharge.{Y-m-d}.log").Printf("检查授权失败: %v", err)
+						continue
+					}
+
+					// 如果授权额度不足，需要先授权
+					if allowance.Cmp(convertAmount) < 0 {
+						// 检查是否已经在authorize_address表中记录了授权操作
+						authorizeCount, _ := g.Model("authorize_address").Where("main_chain", "bsc").
+							Where("address", value.ToAddress).
+							Where("contract_address", commonRechargeContract).
+							Where("coin_address", currency.ContractAddress).Count()
+
+						if authorizeCount == 0 {
+							g.Log().File("merge_recharge.{Y-m-d}.log").Printf("地址 %s 未授权代币 %s 给归集合约，开始授权", value.ToAddress, currency.ContractAddress)
+
+							// 授权无限量代币（使用最大值）
+							maxAmount := new(big.Int)
+							maxAmount.SetString("115792089237316195423570985008687907853269984665640564039457584007913129639935", 10) // 2^256 - 1
+
+							approveHash, approveNonce, err := rpc.ApproveToken(string(privateKey), currency.ContractAddress, commonRechargeContract, maxAmount, gconv.Uint64(MaxNonce))
+							if err != nil {
+								g.Log().File("merge_recharge.{Y-m-d}.log").Printf("授权失败: %v", err)
+								continue
+							}
+
+							if approveHash != nil {
+								// 记录授权信息到authorize_address表
+								g.Model("authorize_address").Data(g.Map{
+									"main_chain":       "bsc",
+									"contract_address": commonRechargeContract,
+									"address":          value.ToAddress,
+									"coin_name":        currency.Name,
+									"coin_decimals":    currency.Decimals,
+									"coin_address":     currency.ContractAddress,
+									"num":              "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+									"authorize_hash":   approveHash,
+								}).Insert()
+
+								// 更新充值记录状态为授权中
+								g.Model("recharge").Where("id", value.Id).Data(g.Map{"status": 6, "nonce": approveNonce, "imputation_hash": approveHash}).Update()
+								g.Log().File("merge_recharge.{Y-m-d}.log").Printf("授权成功，hash: %s", approveHash)
+							}
+						} else {
+							g.Log().File("merge_recharge.{Y-m-d}.log").Printf("地址 %s 已有授权记录，等待确认中", value.ToAddress)
+						}
+					} else {
+						// 已授权，直接调用归集合约
+						g.Log().File("merge_recharge.{Y-m-d}.log").Printf("地址 %s 已授权，开始调用归集合约", value.ToAddress)
+
+						rechargeHash, rechargeNonce, err := rpc.CallRechargeContract(string(privateKey), commonRechargeContract, convertAmount, gconv.Uint64(MaxNonce))
+						if err != nil {
+							g.Log().File("merge_recharge.{Y-m-d}.log").Printf("调用归集合约失败: %v", err)
+							continue
+						}
+
+						if rechargeHash != nil {
+							hashResult = rechargeHash
+							nonce = rechargeNonce
+							g.Log().File("merge_recharge.{Y-m-d}.log").Printf("归集合约调用成功，hash: %s", rechargeHash)
+						}
+					}
+				}
 			} else {
-				hashResult, nonce, _ = rpc.TransferToken(string(privateKey), convertAmount, bnbMergeAddress.ConfigValue, currency.ContractAddress, gconv.Uint64(MaxNonce))
+				if currency.ContractAddress == "0x1000000000000000000000000000000000000000" {
+					hashResult, nonce, _ = rpc.TransferBnb(string(privateKey), convertAmount, bnbMergeAddress.ConfigValue, gconv.Uint64(MaxNonce))
+				} else {
+					hashResult, nonce, _ = rpc.TransferToken(string(privateKey), convertAmount, bnbMergeAddress.ConfigValue, currency.ContractAddress, gconv.Uint64(MaxNonce))
+				}
 			}
 
 			if hashResult != nil {
@@ -643,6 +725,105 @@ func wemixRecharge() {
 
 			if hashResult != nil {
 				g.Model("recharge").Where("id", value.Id).Data(g.Map{"status": 2, "nonce": nonce, "imputation_hash": hashResult}).Update()
+			}
+		}
+	}
+}
+
+// processAuthorizedRecharge 处理已授权待归集的记录
+func processAuthorizedRecharge() {
+	// 查询状态为6(授权中)的记录
+	var list []*model.Recharge
+	err := g.Model("recharge").Where("main_chain", "bsc").Where("status", 6).Scan(&list)
+	if err != nil {
+		g.Log().File("merge_recharge.{Y-m-d}.log").Printf("查询授权中任务失败，%v", err)
+		return
+	}
+
+	cache := service.Cache.New()
+	rpcUrl := gconv.String(cache.Get("bnb_rpc_url"))
+	client, _ := ethclient.Dial(rpcUrl)
+	defer client.Close()
+
+	commonRechargeContract := g.Cfg().GetString("bsc.common_recharge")
+	bnbMergeAddress, _ := service.SysConfig.GetConfigByKey("sys.bnbMergeAddress")
+
+	for _, value := range list {
+		// 检查授权交易是否已确认
+		if value.ImputationHash != "" {
+			receipt, err := client.TransactionReceipt(context.Background(), common.HexToHash(value.ImputationHash))
+			if err != nil {
+				g.Log().File("merge_recharge.{Y-m-d}.log").Printf("查询授权交易状态失败: %v", err)
+				continue
+			}
+
+			// 如果交易成功确认
+			if receipt.Status == 1 {
+				g.Log().File("merge_recharge.{Y-m-d}.log").Printf("授权交易已确认，开始执行归集，地址: %s", value.ToAddress)
+
+				var (
+					currency *model.Currency
+					address  *model.Address
+				)
+
+				// 查询币种和地址信息
+				g.Model("currency").Where("main_chain", "bsc").Where("contract_address", value.ContractAddress).FindScan(&currency)
+				if currency == nil {
+					g.Log().File("merge_recharge.{Y-m-d}.log").Printf("未找到币种信息，合约地址: %s", value.ContractAddress)
+					continue
+				}
+
+				g.Model("address").Where("main_chain", "bsc").Where("address", value.ToAddress).FindScan(&address)
+				if address == nil {
+					g.Log().File("merge_recharge.{Y-m-d}.log").Printf("未找到地址信息，地址: %s", value.ToAddress)
+					continue
+				}
+
+				privateKey, _ := library.DecryptByAes(address.PrivateKey)
+
+				// 计算转账金额
+				amount, _ := decimal.NewFromString(value.Amount)
+				tenDecimal := decimal.NewFromInt(gconv.Int64(math.Pow(10, float64(currency.Decimals))))
+				convertAmount := amount.Mul(tenDecimal).BigInt()
+
+				// 查询当前地址的最大Nonce
+				MaxNonce, _ := g.Model("recharge").Where("main_chain", "bsc").Where("to_address", value.ToAddress).WhereIn("status", [3]int{2, 3, 4}).OrderDesc("id").Value("nonce")
+
+				// 调用归集合约
+				if commonRechargeContract != "" {
+					rechargeHash, rechargeNonce, err := rpc.CallRechargeContract(string(privateKey), commonRechargeContract, convertAmount, gconv.Uint64(MaxNonce))
+					if err != nil {
+						g.Log().File("merge_recharge.{Y-m-d}.log").Printf("调用归集合约失败: %v", err)
+						// 将状态改为归集失败
+						g.Model("recharge").Where("id", value.Id).Data(g.Map{"status": 4}).Update()
+						continue
+					}
+
+					if rechargeHash != nil {
+						// 更新为归集上链中状态
+						g.Model("recharge").Where("id", value.Id).Data(g.Map{"status": 2, "nonce": rechargeNonce, "imputation_hash": rechargeHash}).Update()
+						g.Log().File("merge_recharge.{Y-m-d}.log").Printf("归集合约调用成功，hash: %s", rechargeHash)
+					}
+				} else {
+					// 普通归集方式
+					if currency.ContractAddress == "0x1000000000000000000000000000000000000000" {
+						hashResult, nonce, _ := rpc.TransferBnb(string(privateKey), convertAmount, bnbMergeAddress.ConfigValue, gconv.Uint64(MaxNonce))
+						if hashResult != nil {
+							g.Model("recharge").Where("id", value.Id).Data(g.Map{"status": 2, "nonce": nonce, "imputation_hash": hashResult}).Update()
+						}
+					} else {
+						hashResult, nonce, _ := rpc.TransferToken(string(privateKey), convertAmount, bnbMergeAddress.ConfigValue, currency.ContractAddress, gconv.Uint64(MaxNonce))
+						if hashResult != nil {
+							g.Model("recharge").Where("id", value.Id).Data(g.Map{"status": 2, "nonce": nonce, "imputation_hash": hashResult}).Update()
+						}
+					}
+				}
+			} else if receipt.Status == 0 {
+				// 授权交易失败，重置状态为待归集
+				g.Log().File("merge_recharge.{Y-m-d}.log").Printf("授权交易失败，重置状态，地址: %s", value.ToAddress)
+				g.Model("recharge").Where("id", value.Id).Data(g.Map{"status": 1}).Update()
+				// 删除失败的授权记录
+				g.Model("authorize_address").Where("main_chain", "bsc").Where("address", value.ToAddress).Where("authorize_hash", value.ImputationHash).Delete()
 			}
 		}
 	}

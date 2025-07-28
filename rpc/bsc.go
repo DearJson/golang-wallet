@@ -9,6 +9,13 @@ import (
 	token2 "gfast/abi/token"
 	"gfast/app/common/service"
 	"gfast/library"
+	"log"
+	"math"
+	"math/big"
+	"strconv"
+	"time"
+
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -20,11 +27,6 @@ import (
 	"github.com/gogf/gf/util/gconv"
 	"github.com/shopspring/decimal"
 	"golang.org/x/crypto/sha3"
-	"log"
-	"math"
-	"math/big"
-	"strconv"
-	"time"
 )
 
 type BscClient struct {
@@ -562,4 +564,259 @@ func SafeTransferFrom(privateKeys string, toAddress string, tokenAddress string,
 		return nil, 0, err
 	}
 	return val.Hash().Hex(), nonce, nil
+}
+
+// CheckTokenAllowance 检查代币授权额度
+func CheckTokenAllowance(tokenAddress, ownerAddress, spenderAddress string) (*big.Int, error) {
+	cache := service.Cache.New()
+	rpcUrl := gconv.String(cache.Get("bnb_rpc_url"))
+	client, err := ethclient.Dial(rpcUrl)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Close()
+
+	// 构造allowance方法调用
+	allowanceFnSignature := []byte("allowance(address,address)")
+	hash := sha3.NewLegacyKeccak256()
+	hash.Write(allowanceFnSignature)
+	methodID := hash.Sum(nil)[:4]
+
+	ownerAddr := common.HexToAddress(ownerAddress)
+	spenderAddr := common.HexToAddress(spenderAddress)
+
+	paddedOwner := common.LeftPadBytes(ownerAddr.Bytes(), 32)
+	paddedSpender := common.LeftPadBytes(spenderAddr.Bytes(), 32)
+
+	var data []byte
+	data = append(data, methodID...)
+	data = append(data, paddedOwner...)
+	data = append(data, paddedSpender...)
+
+	tokenAddr := common.HexToAddress(tokenAddress)
+	callMsg := ethereum.CallMsg{
+		To:   &tokenAddr,
+		Data: data,
+	}
+
+	result, err := client.CallContract(context.Background(), callMsg, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	allowance := new(big.Int).SetBytes(result)
+	return allowance, nil
+}
+
+// ApproveToken 授权代币给指定地址
+func ApproveToken(privateKeys string, tokenAddress string, spenderAddress string, amount *big.Int, MaxNonce uint64) (transferData interface{}, currentNonce uint64, err error) {
+	cache := service.Cache.New()
+	rpcUrl := gconv.String(cache.Get("bnb_rpc_url"))
+	client, err := ethclient.Dial(rpcUrl)
+	if err != nil {
+		g.Log().File("approve.{Y-m-d}.log").Printf("%v", err)
+		return nil, 0, err
+	}
+	defer client.Close()
+
+	privateKey, err := crypto.HexToECDSA(privateKeys)
+	if err != nil {
+		g.Log().File("approve.{Y-m-d}.log").Printf("%v", err)
+		return nil, 0, err
+	}
+
+	publicKey := privateKey.Public()
+	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
+	if !ok {
+		g.Log().File("approve.{Y-m-d}.log").Println("cannot assert type: publicKey is not of type *ecdsa.PublicKey")
+		return nil, 0, err
+	}
+
+	fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
+	nonce, err := client.PendingNonceAt(context.Background(), fromAddress)
+	if err != nil {
+		g.Log().File("approve.{Y-m-d}.log").Printf("%v", err)
+		return nil, 0, err
+	}
+
+	// 检查nonce
+	if gconv.Uint64(MaxNonce) > 0 {
+		NextNonce := gconv.Uint64(MaxNonce) + 1
+		if nonce < NextNonce {
+			nonce = NextNonce
+		}
+	}
+
+	// 获取实时gas price
+	gasPrice, err := client.SuggestGasPrice(context.Background())
+	if err != nil {
+		g.Log().File("approve.{Y-m-d}.log").Printf("获取实时gas price失败，使用配置值: %v", err)
+		// 如果获取实时gas price失败，回退到配置值
+		gasPriceConfig, _ := service.SysConfig.GetConfigByKey("sys.bnbGasPrice")
+		gasPrice = big.NewInt(gconv.Int64(gasPriceConfig.ConfigValue) * gconv.Int64(math.Pow(10, 9)))
+	} else {
+		g.Log().File("approve.{Y-m-d}.log").Printf("使用实时gas price: %s wei", gasPrice.String())
+	}
+
+	spenderAddr := common.HexToAddress(spenderAddress)
+	tokenAddr := common.HexToAddress(tokenAddress)
+
+	// 构造approve方法调用
+	approveFnSignature := []byte("approve(address,uint256)")
+	hash := sha3.NewLegacyKeccak256()
+	hash.Write(approveFnSignature)
+	methodID := hash.Sum(nil)[:4]
+
+	paddedAddress := common.LeftPadBytes(spenderAddr.Bytes(), 32)
+	paddedAmount := common.LeftPadBytes(amount.Bytes(), 32)
+
+	var data []byte
+	data = append(data, methodID...)
+	data = append(data, paddedAddress...)
+	data = append(data, paddedAmount...)
+
+	// 动态估算gasLimit
+	callMsg := ethereum.CallMsg{
+		From:     fromAddress,
+		To:       &tokenAddr,
+		Value:    big.NewInt(0),
+		Data:     data,
+		GasPrice: gasPrice,
+	}
+
+	estimatedGas, err := client.EstimateGas(context.Background(), callMsg)
+	if err != nil {
+		g.Log().File("approve.{Y-m-d}.log").Printf("估算gas失败，使用配置值: %v", err)
+		// 如果估算失败，回退到配置值
+		gasLimitConfig, _ := service.SysConfig.GetConfigByKey("sys.bnbGasLimit")
+		estimatedGas = gconv.Uint64(gasLimitConfig.ConfigValue)
+	} else {
+		g.Log().File("approve.{Y-m-d}.log").Printf("估算gas: %d", estimatedGas)
+	}
+
+	// 在估算值基础上增加20%缓冲
+	gasLimit := estimatedGas * 120 / 100
+	g.Log().File("approve.{Y-m-d}.log").Printf("最终使用gas limit: %d (估算值: %d + 20%%缓冲)", gasLimit, estimatedGas)
+
+	tx := types.NewTransaction(nonce, tokenAddr, big.NewInt(0), gasLimit, gasPrice, data)
+
+	chainID := g.Cfg().GetInt64("bsc.chain_id")
+	signedTx, err := types.SignTx(tx, types.NewEIP155Signer(big.NewInt(chainID)), privateKey)
+	if err != nil {
+		g.Log().File("approve.{Y-m-d}.log").Printf("签名交易失败: %v", err)
+		return nil, 0, err
+	}
+
+	err = client.SendTransaction(context.Background(), signedTx)
+	if err != nil {
+		g.Log().File("approve.{Y-m-d}.log").Printf("发送交易失败: %v", err)
+		return nil, 0, err
+	}
+
+	return signedTx.Hash().Hex(), nonce, nil
+}
+
+// CallRechargeContract 调用归集合约的recharge方法
+func CallRechargeContract(privateKeys string, contractAddress string, amount *big.Int, MaxNonce uint64) (transferData interface{}, currentNonce uint64, err error) {
+	cache := service.Cache.New()
+	rpcUrl := gconv.String(cache.Get("bnb_rpc_url"))
+	client, err := ethclient.Dial(rpcUrl)
+	if err != nil {
+		g.Log().File("recharge_contract.{Y-m-d}.log").Printf("%v", err)
+		return nil, 0, err
+	}
+	defer client.Close()
+
+	privateKey, err := crypto.HexToECDSA(privateKeys)
+	if err != nil {
+		g.Log().File("recharge_contract.{Y-m-d}.log").Printf("%v", err)
+		return nil, 0, err
+	}
+
+	publicKey := privateKey.Public()
+	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
+	if !ok {
+		g.Log().File("recharge_contract.{Y-m-d}.log").Println("cannot assert type: publicKey is not of type *ecdsa.PublicKey")
+		return nil, 0, err
+	}
+
+	fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
+	nonce, err := client.PendingNonceAt(context.Background(), fromAddress)
+	if err != nil {
+		g.Log().File("recharge_contract.{Y-m-d}.log").Printf("%v", err)
+		return nil, 0, err
+	}
+
+	// 检查nonce
+	if gconv.Uint64(MaxNonce) > 0 {
+		NextNonce := gconv.Uint64(MaxNonce) + 1
+		if nonce < NextNonce {
+			nonce = NextNonce
+		}
+	}
+
+	// 获取实时gas price
+	gasPrice, err := client.SuggestGasPrice(context.Background())
+	if err != nil {
+		g.Log().File("recharge_contract.{Y-m-d}.log").Printf("获取实时gas price失败，使用配置值: %v", err)
+		// 如果获取实时gas price失败，回退到配置值
+		gasPriceConfig, _ := service.SysConfig.GetConfigByKey("sys.bnbGasPrice")
+		gasPrice = big.NewInt(gconv.Int64(gasPriceConfig.ConfigValue) * gconv.Int64(math.Pow(10, 9)))
+	} else {
+		g.Log().File("recharge_contract.{Y-m-d}.log").Printf("使用实时gas price: %s wei", gasPrice.String())
+	}
+
+	contractAddr := common.HexToAddress(contractAddress)
+
+	// 构造recharge方法调用
+	rechargeFnSignature := []byte("recharge(uint256)")
+	hash := sha3.NewLegacyKeccak256()
+	hash.Write(rechargeFnSignature)
+	methodID := hash.Sum(nil)[:4]
+
+	paddedAmount := common.LeftPadBytes(amount.Bytes(), 32)
+
+	var data []byte
+	data = append(data, methodID...)
+	data = append(data, paddedAmount...)
+
+	// 动态估算gasLimit
+	callMsg := ethereum.CallMsg{
+		From:     fromAddress,
+		To:       &contractAddr,
+		Value:    big.NewInt(0),
+		Data:     data,
+		GasPrice: gasPrice,
+	}
+
+	estimatedGas, err := client.EstimateGas(context.Background(), callMsg)
+	if err != nil {
+		g.Log().File("recharge_contract.{Y-m-d}.log").Printf("估算gas失败，使用配置值: %v", err)
+		// 如果估算失败，回退到配置值
+		gasLimitConfig, _ := service.SysConfig.GetConfigByKey("sys.bnbGasLimit")
+		estimatedGas = gconv.Uint64(gasLimitConfig.ConfigValue)
+	} else {
+		g.Log().File("recharge_contract.{Y-m-d}.log").Printf("估算gas: %d", estimatedGas)
+	}
+
+	// 在估算值基础上增加20%缓冲
+	gasLimit := estimatedGas * 120 / 100
+	g.Log().File("recharge_contract.{Y-m-d}.log").Printf("最终使用gas limit: %d (估算值: %d + 20%%缓冲)", gasLimit, estimatedGas)
+
+	tx := types.NewTransaction(nonce, contractAddr, big.NewInt(0), gasLimit, gasPrice, data)
+
+	chainID := g.Cfg().GetInt64("bsc.chain_id")
+	signedTx, err := types.SignTx(tx, types.NewEIP155Signer(big.NewInt(chainID)), privateKey)
+	if err != nil {
+		g.Log().File("recharge_contract.{Y-m-d}.log").Printf("签名交易失败: %v", err)
+		return nil, 0, err
+	}
+
+	err = client.SendTransaction(context.Background(), signedTx)
+	if err != nil {
+		g.Log().File("recharge_contract.{Y-m-d}.log").Printf("发送交易失败: %v", err)
+		return nil, 0, err
+	}
+
+	return signedTx.Hash().Hex(), nonce, nil
 }

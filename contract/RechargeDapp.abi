@@ -1,0 +1,20 @@
+[
+    {
+        "inputs": [
+            {
+                "internalType": "string",
+                "name": "abiKey",
+                "type": "string"
+            },
+            {
+                "internalType": "bytes",
+                "name": "data",
+                "type": "bytes"
+            }
+        ],
+        "name": "withdraw",
+        "outputs": [],
+        "stateMutability": "payable",
+        "type": "function"
+    }
+] 
