@@ -23,8 +23,6 @@ func init() {
 			api.GfToken.Middleware(group)
 			//context拦截器
 			group.Middleware(middleware.Ctx, middleware.Auth)
-			//后台操作日志记录
-			group.Hook("/*", ghttp.HookAfterOutput, api.SysOperLog.OperationLog)
 			//后台上传
 			group.Group("/upload", func(group *ghttp.RouterGroup) {
 				//单图上传
@@ -151,13 +149,7 @@ func init() {
 					group.DELETE("delete", api.SysLoginLog.Delete)
 					group.DELETE("clear", api.SysLoginLog.Clear)
 				})
-				//操作日志
-				group.Group("/operLog", func(group *ghttp.RouterGroup) {
-					group.GET("list", api.SysOperLog.List)
-					group.GET("detail", api.SysOperLog.Detail)
-					group.DELETE("delete", api.SysOperLog.Delete)
-					group.DELETE("clear", api.SysOperLog.Clear)
-				})
+
 			})
 			//开发工具
 			group.Group("/tools", func(group *ghttp.RouterGroup) {

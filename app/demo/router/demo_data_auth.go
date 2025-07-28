@@ -11,11 +11,12 @@ import (
 	"gfast/app/demo/api"
 	sysApi "gfast/app/system/api"
 	"gfast/middleware"
+
 	"github.com/gogf/gf/frame/g"
 	"github.com/gogf/gf/net/ghttp"
 )
 
-//加载路由
+// 加载路由
 func init() {
 	s := g.Server()
 	s.Group("/", func(group *ghttp.RouterGroup) {
@@ -25,8 +26,6 @@ func init() {
 				sysApi.GfToken.AuthMiddleware(group)
 				//context拦截器
 				group.Middleware(middleware.Ctx, middleware.Auth)
-				//后台操作日志记录
-				group.Hook("/*", ghttp.HookAfterOutput, sysApi.SysOperLog.OperationLog)
 				group.GET("list", api.DemoDataAuth.List)
 				group.GET("get", api.DemoDataAuth.Get)
 				group.POST("add", api.DemoDataAuth.Add)

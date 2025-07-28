@@ -820,3 +820,67 @@ func CallRechargeContract(privateKeys string, contractAddress string, amount *bi
 
 	return signedTx.Hash().Hex(), nonce, nil
 }
+
+// GetBlocksByNumbers 批量获取多个块的信息，减少RPC请求次数
+func (b *BscClient) GetBlocksByNumbers(blockNumbers []int64) (blocks []interface{}, err error) {
+	if len(blockNumbers) == 0 {
+		return nil, nil
+	}
+
+	// 构建批量RPC请求
+	var batchRequests []rpc.BatchElem
+	blocks = make([]interface{}, len(blockNumbers))
+
+	for i, blockNumber := range blockNumbers {
+		blockNumberHex := "0x" + strconv.FormatInt(blockNumber, 16)
+		batchRequests = append(batchRequests, rpc.BatchElem{
+			Method: "eth_getBlockByNumber",
+			Args:   []interface{}{blockNumberHex, true},
+			Result: &blocks[i],
+		})
+	}
+
+	// 执行批量RPC调用
+	err = b.client.BatchCall(batchRequests)
+	if err != nil {
+		return nil, err
+	}
+
+	// 检查每个请求的错误
+	for i, req := range batchRequests {
+		if req.Error != nil {
+			g.Log().Printf("批量获取区块%d失败: %v", blockNumbers[i], req.Error)
+			blocks[i] = nil // 设置为nil表示该块获取失败
+		}
+	}
+
+	return blocks, nil
+}
+
+// GetTransferLogsBatch 批量查询指定区块范围内的Transfer事件日志
+func (b *BscClient) GetTransferLogsBatch(fromBlock, toBlock int64, addresses []string) (logs []interface{}, err error) {
+	fromBlockHex := "0x" + strconv.FormatInt(fromBlock, 16)
+	toBlockHex := "0x" + strconv.FormatInt(toBlock, 16)
+
+	// ERC20 Transfer事件的签名
+	transferTopic := "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+
+	// 构建过滤器
+	filter := map[string]interface{}{
+		"fromBlock": fromBlockHex,
+		"toBlock":   toBlockHex,
+		"topics":    []interface{}{transferTopic}, // 只查询Transfer事件
+	}
+
+	// 如果指定了地址，则只查询这些合约地址的Transfer事件
+	if len(addresses) > 0 {
+		filter["address"] = addresses
+	}
+
+	err = b.client.Call(&logs, "eth_getLogs", filter)
+	if err != nil {
+		return nil, err
+	}
+
+	return logs, nil
+}
