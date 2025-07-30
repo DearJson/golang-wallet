@@ -3,6 +3,7 @@ package task
 import (
 	"context"
 	"fmt"
+	commonModel "gfast/app/common/model"
 	"gfast/app/common/service"
 	"gfast/app/system/model"
 	"gfast/library"
@@ -17,6 +18,42 @@ import (
 	"github.com/gogf/gf/util/gconv"
 	"github.com/shopspring/decimal"
 )
+
+// calculateEstimatedGasFee 计算预估的gas费用，考虑缓冲和多重交易场景
+func calculateEstimatedGasFee(mainChain string, transactionCount int) decimal.Decimal {
+	var gasLimitConfig, gasPriceConfig *commonModel.SysConfig
+
+	switch mainChain {
+	case "bsc":
+		gasLimitConfig, _ = service.SysConfig.GetConfigByKey("sys.bnbGasLimit")
+		gasPriceConfig, _ = service.SysConfig.GetConfigByKey("sys.bnbGasPrice")
+	case "eth":
+		gasLimitConfig, _ = service.SysConfig.GetConfigByKey("sys.ethGasLimit")
+		gasPriceConfig, _ = service.SysConfig.GetConfigByKey("sys.ethGasPrice")
+	case "heco":
+		gasLimitConfig, _ = service.SysConfig.GetConfigByKey("sys.hecoGasLimit")
+		gasPriceConfig, _ = service.SysConfig.GetConfigByKey("sys.hecoGasPrice")
+	case "wemix":
+		gasLimitConfig, _ = service.SysConfig.GetConfigByKey("sys.wemixGasLimit")
+		gasPriceConfig, _ = service.SysConfig.GetConfigByKey("sys.wemixGasPrice")
+	default:
+		g.Log().Printf("不支持的主链: %s", mainChain)
+		return decimal.Zero
+	}
+
+	if gasLimitConfig == nil || gasPriceConfig == nil {
+		g.Log().Printf("获取%s链gas配置失败", mainChain)
+		return decimal.Zero
+	}
+
+	// 基础gas费用
+	baseGasInt := gconv.Int64(gasPriceConfig.ConfigValue) * gconv.Int64(math.Pow10(9)) * gconv.Int64(gasLimitConfig.ConfigValue)
+
+	// 考虑交易数量（授权+归集等多重交易）并增加30%安全缓冲
+	estimatedGasInt := baseGasInt * int64(transactionCount) * 130 / 100
+
+	return decimal.NewFromInt(estimatedGasInt)
+}
 
 // 归集任务
 func rechargeTask() {
@@ -54,9 +91,6 @@ func bscRecharge() {
 		g.Log().File("merge_recharge.{Y-m-d}.log").Println("归集地址或手续费私钥地址未配置，退出归集")
 		return
 	}
-	bnbGasLimit, _ := service.SysConfig.GetConfigByKey("sys.bnbGasLimit")
-	bnbGasPrice, _ := service.SysConfig.GetConfigByKey("sys.bnbGasPrice")
-
 	bnbFeePrivateKey, _ := library.DecryptByAes(bnbFeeAddressPrivateKey.ConfigValue)
 
 	var list []*model.Recharge
@@ -67,8 +101,9 @@ func bscRecharge() {
 	cache := service.Cache.New()
 	rpcUrl := gconv.String(cache.Get("bnb_rpc_url"))
 	client, _ := ethclient.Dial(rpcUrl)
-	minFeeInt := gconv.Int64(bnbGasPrice.ConfigValue) * gconv.Int64(math.Pow10(9)) * gconv.Int64(bnbGasLimit.ConfigValue)
-	minFee := decimal.NewFromInt(minFeeInt)
+
+	// 使用新的辅助函数计算预估gas费用，考虑可能的授权+归集两次交易
+	minFee := calculateEstimatedGasFee("bsc", 2)
 
 	for _, value := range list {
 
@@ -537,6 +572,10 @@ func tronRecharge() {
 			if currency.ContractAddress == "TBRop8PopYu8atWWez3g3ueVtSpseW78b6" {
 				amd, _ := decimal.NewFromString(value.Amount)
 				txId, err = tronClient.TransferTrx(string(privateKey), value.ToAddress, tronMergeAddress.ConfigValue, amd, "")
+				if err != nil {
+					g.Log().File("merge_recharge.{Y-m-d}.log").Printf("TRON归集失败: %v", err)
+					continue
+				}
 			} else {
 				//处理金额
 				amount, _ := decimal.NewFromString(value.Amount)
@@ -544,6 +583,10 @@ func tronRecharge() {
 				convertAmount := amount.Mul(tenDecimal).BigInt()
 
 				txId, err = tronClient.TransferContract(string(privateKey), value.ToAddress, tronMergeAddress.ConfigValue, value.ContractAddress, convertAmount, tronGasFee)
+				if err != nil {
+					g.Log().File("merge_recharge.{Y-m-d}.log").Printf("TRON代币归集失败: %v", err)
+					continue
+				}
 			}
 
 			if txId != "" {
@@ -776,6 +819,54 @@ func processAuthorizedRecharge() {
 				g.Model("address").Where("main_chain", "bsc").Where("address", value.ToAddress).FindScan(&address)
 				if address == nil {
 					g.Log().File("merge_recharge.{Y-m-d}.log").Printf("未找到地址信息，地址: %s", value.ToAddress)
+					continue
+				}
+
+				// 授权后重新检查余额，确认手续费是否足够进行归集
+				balanceWei, _ := client.BalanceAt(context.Background(), common.HexToAddress(value.ToAddress), nil)
+				currentBalance := decimal.NewFromBigInt(balanceWei, 0)
+
+				// 使用辅助函数计算归集所需的预估gas费用（只需要1次归集交易）
+				estimatedFee := calculateEstimatedGasFee("bsc", 1)
+
+				// 检查余额是否足够支付归集交易
+				if currentBalance.LessThan(estimatedFee) {
+					g.Log().File("merge_recharge.{Y-m-d}.log").Printf("授权后余额不足，当前余额: %s, 预估手续费: %s, 需要补充手续费，地址: %s",
+						currentBalance.String(), estimatedFee.String(), value.ToAddress)
+
+					// 计算需要补充的手续费
+					additionalFee := estimatedFee.Sub(currentBalance)
+					bnbFeeAddress, _ := service.SysConfig.GetConfigByKey("sys.bnbFeeAddress")
+					bnbFeeAddressPrivateKey, _ := service.SysConfig.GetConfigByKey("sys.bnbFeeAddressPrivateKey")
+					bnbFeePrivateKey, _ := library.DecryptByAes(bnbFeeAddressPrivateKey.ConfigValue)
+
+					// 获取手续费地址的最大nonce
+					feeMaxNonce, _ := g.Model("fee_list").Where("main_chain", "bsc").Where("withdraw_address", bnbFeeAddress.ConfigValue).OrderDesc("id").Value("nonce")
+
+					// 补充手续费
+					hashResult, nonce, err := rpc.TransferBnb(string(bnbFeePrivateKey), additionalFee.BigInt(), value.ToAddress, gconv.Uint64(feeMaxNonce))
+					if err != nil || hashResult == nil {
+						g.Log().File("merge_recharge.{Y-m-d}.log").Printf("补充手续费失败: %v, 地址: %s", err, value.ToAddress)
+						continue
+					}
+
+					// 记录补充的手续费
+					additionalFeeEth, _ := additionalFee.Div(decimal.NewFromInt(int64(math.Pow10(18)))).Float64()
+					g.Model("fee_list").Data(g.Map{
+						"main_chain":       "bsc",
+						"coin_name":        "bnb",
+						"withdraw_address": bnbFeeAddress.ConfigValue,
+						"address":          value.ToAddress,
+						"amount":           additionalFeeEth,
+						"hash":             hashResult,
+						"nonce":            nonce,
+						"recharge_id":      value.Id,
+						"remark":           "授权后补充手续费",
+					}).Insert()
+
+					g.Log().File("merge_recharge.{Y-m-d}.log").Printf("成功补充手续费: %.6f BNB, hash: %s", additionalFeeEth, hashResult)
+
+					// 暂停处理，等待下一轮任务确认手续费到账后再进行归集
 					continue
 				}
 
