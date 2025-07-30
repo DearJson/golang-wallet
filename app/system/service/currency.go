@@ -14,6 +14,7 @@ import (
 	"gfast/app/common/service"
 	"gfast/app/system/dao"
 	"gfast/app/system/model"
+
 	"github.com/gogf/gf/errors/gerror"
 	"github.com/gogf/gf/frame/g"
 	"github.com/gogf/gf/util/gconv"
@@ -139,157 +140,157 @@ func (s *currency) DeleteByIds(ctx context.Context, ids []int) (err error) {
 }
 
 func (s *currency) GetBnbCoinAddress(ctx context.Context) (list1 map[string]*model.Currency, err error) {
-	list1 = make(map[string]*model.Currency)
 	cache := service.Cache.New()
-	//从缓存获取
-	iList := cache.Get(global.BscCoinAddressList)
-	if iList != nil {
-		err = gconv.Struct(iList, &list1)
-		return
-	}
-	var list []*model.Currency
-	err = dao.Currency.Ctx(ctx).Where(dao.Currency.Columns.MainChain, "bsc").Scan(&list)
 
-	n := ""
-	for _, value := range list {
-		n = value.ContractAddress
-		list1[n] = value
+	result := cache.GetOrSetFuncLock(global.BscCoinAddressList, func() (interface{}, error) {
+		var list []*model.Currency
+		err := dao.Currency.Ctx(ctx).Where(dao.Currency.Columns.MainChain, "bsc").Scan(&list)
+		if err != nil {
+			g.Log().Error(err)
+			return nil, gerror.New("获取数据失败")
+		}
+
+		mapResult := make(map[string]*model.Currency)
+		for _, value := range list {
+			mapResult[value.ContractAddress] = value
+		}
+		return mapResult, nil
+	}, 0, nil)
+
+	if result != nil {
+		err = gconv.Struct(result, &list1)
+	} else {
+		list1 = make(map[string]*model.Currency)
 	}
-	if err != nil {
-		g.Log().Error(err)
-		err = gerror.New("获取数据失败")
-	}
-	//缓存
-	cache.Set(global.BscCoinAddressList, list1, 0)
 	return
 }
 
 func (s *currency) GetEthCoinAddress(ctx context.Context) (list1 map[string]*model.Currency, err error) {
-	list1 = make(map[string]*model.Currency)
 	cache := service.Cache.New()
-	//从缓存获取
-	iList := cache.Get(global.EthCoinAddressList)
-	if iList != nil {
-		err = gconv.Struct(iList, &list1)
-		return
-	}
-	var list []*model.Currency
-	err = dao.Currency.Ctx(ctx).Where(dao.Currency.Columns.MainChain, "eth").Scan(&list)
 
-	n := ""
-	for _, value := range list {
-		n = value.ContractAddress
-		list1[n] = value
+	result := cache.GetOrSetFuncLock(global.EthCoinAddressList, func() (interface{}, error) {
+		var list []*model.Currency
+		err := dao.Currency.Ctx(ctx).Where(dao.Currency.Columns.MainChain, "eth").Scan(&list)
+		if err != nil {
+			g.Log().Error(err)
+			return nil, gerror.New("获取数据失败")
+		}
+
+		mapResult := make(map[string]*model.Currency)
+		for _, value := range list {
+			mapResult[value.ContractAddress] = value
+		}
+		return mapResult, nil
+	}, 0, nil)
+
+	if result != nil {
+		err = gconv.Struct(result, &list1)
+	} else {
+		list1 = make(map[string]*model.Currency)
 	}
-	if err != nil {
-		g.Log().Error(err)
-		err = gerror.New("获取数据失败")
-	}
-	//缓存
-	cache.Set(global.EthCoinAddressList, list1, 0)
 	return
 }
 
 func (s *currency) GetNacCoinAddress(ctx context.Context) (list1 map[string]*model.Currency, err error) {
-	list1 = make(map[string]*model.Currency)
 	cache := service.Cache.New()
-	//从缓存获取
-	iList := cache.Get(global.NacCoinAddressList)
-	if iList != nil {
-		err = gconv.Struct(iList, &list1)
-		return
-	}
-	var list []*model.Currency
-	err = dao.Currency.Ctx(ctx).Where(dao.Currency.Columns.MainChain, "nac").Scan(&list)
 
-	n := ""
-	for _, value := range list {
-		n = value.ContractAddress
-		list1[n] = value
+	result := cache.GetOrSetFuncLock(global.NacCoinAddressList, func() (interface{}, error) {
+		var list []*model.Currency
+		err := dao.Currency.Ctx(ctx).Where(dao.Currency.Columns.MainChain, "nac").Scan(&list)
+		if err != nil {
+			g.Log().Error(err)
+			return nil, gerror.New("获取数据失败")
+		}
+
+		mapResult := make(map[string]*model.Currency)
+		for _, value := range list {
+			mapResult[value.ContractAddress] = value
+		}
+		return mapResult, nil
+	}, 0, nil)
+
+	if result != nil {
+		err = gconv.Struct(result, &list1)
+	} else {
+		list1 = make(map[string]*model.Currency)
 	}
-	if err != nil {
-		g.Log().Error(err)
-		err = gerror.New("获取数据失败")
-	}
-	//缓存
-	cache.Set(global.NacCoinAddressList, list1, 0)
 	return
 }
 
 func (s *currency) GetHecoCoinAddress(ctx context.Context) (list1 map[string]*model.Currency, err error) {
-	list1 = make(map[string]*model.Currency)
 	cache := service.Cache.New()
-	//从缓存获取
-	iList := cache.Get(global.HecoCoinAddressList)
-	if iList != nil {
-		err = gconv.Struct(iList, &list1)
-		return
-	}
-	var list []*model.Currency
-	err = dao.Currency.Ctx(ctx).Where(dao.Currency.Columns.MainChain, "heco").Scan(&list)
 
-	n := ""
-	for _, value := range list {
-		n = value.ContractAddress
-		list1[n] = value
+	result := cache.GetOrSetFuncLock(global.HecoCoinAddressList, func() (interface{}, error) {
+		var list []*model.Currency
+		err := dao.Currency.Ctx(ctx).Where(dao.Currency.Columns.MainChain, "heco").Scan(&list)
+		if err != nil {
+			g.Log().Error(err)
+			return nil, gerror.New("获取数据失败")
+		}
+
+		mapResult := make(map[string]*model.Currency)
+		for _, value := range list {
+			mapResult[value.ContractAddress] = value
+		}
+		return mapResult, nil
+	}, 0, nil)
+
+	if result != nil {
+		err = gconv.Struct(result, &list1)
+	} else {
+		list1 = make(map[string]*model.Currency)
 	}
-	if err != nil {
-		g.Log().Error(err)
-		err = gerror.New("获取数据失败")
-	}
-	//缓存
-	cache.Set(global.HecoCoinAddressList, list1, 0)
 	return
 }
 
 func (s *currency) GetWemixCoinAddress(ctx context.Context) (list1 map[string]*model.Currency, err error) {
-	list1 = make(map[string]*model.Currency)
 	cache := service.Cache.New()
-	//从缓存获取
-	iList := cache.Get(global.WemixCoinAddressList)
-	if iList != nil {
-		err = gconv.Struct(iList, &list1)
-		return
-	}
-	var list []*model.Currency
-	err = dao.Currency.Ctx(ctx).Where(dao.Currency.Columns.MainChain, "wemix").Scan(&list)
 
-	n := ""
-	for _, value := range list {
-		n = value.ContractAddress
-		list1[n] = value
+	result := cache.GetOrSetFuncLock(global.WemixCoinAddressList, func() (interface{}, error) {
+		var list []*model.Currency
+		err := dao.Currency.Ctx(ctx).Where(dao.Currency.Columns.MainChain, "wemix").Scan(&list)
+		if err != nil {
+			g.Log().Error(err)
+			return nil, gerror.New("获取数据失败")
+		}
+
+		mapResult := make(map[string]*model.Currency)
+		for _, value := range list {
+			mapResult[value.ContractAddress] = value
+		}
+		return mapResult, nil
+	}, 0, nil)
+
+	if result != nil {
+		err = gconv.Struct(result, &list1)
+	} else {
+		list1 = make(map[string]*model.Currency)
 	}
-	if err != nil {
-		g.Log().Error(err)
-		err = gerror.New("获取数据失败")
-	}
-	//缓存
-	cache.Set(global.WemixCoinAddressList, list1, 0)
 	return
 }
 
 func (s *currency) GetTronCoinAddress(ctx context.Context) (list1 map[string]*model.Currency, err error) {
-	list1 = make(map[string]*model.Currency)
 	cache := service.Cache.New()
-	//从缓存获取
-	iList := cache.Get(global.TronCoinAddressList)
-	if iList != nil {
-		err = gconv.Struct(iList, &list1)
-		return
-	}
-	var list []*model.Currency
-	err = dao.Currency.Ctx(ctx).Where(dao.Currency.Columns.MainChain, "tron").Scan(&list)
 
-	n := ""
-	for _, value := range list {
-		n = value.ContractAddress
-		list1[n] = value
+	result := cache.GetOrSetFuncLock(global.TronCoinAddressList, func() (interface{}, error) {
+		var list []*model.Currency
+		err := dao.Currency.Ctx(ctx).Where(dao.Currency.Columns.MainChain, "tron").Scan(&list)
+		if err != nil {
+			g.Log().Error(err)
+			return nil, gerror.New("获取数据失败")
+		}
+
+		mapResult := make(map[string]*model.Currency)
+		for _, value := range list {
+			mapResult[value.ContractAddress] = value
+		}
+		return mapResult, nil
+	}, 0, nil)
+
+	if result != nil {
+		err = gconv.Struct(result, &list1)
+	} else {
+		list1 = make(map[string]*model.Currency)
 	}
-	if err != nil {
-		g.Log().Error(err)
-		err = gerror.New("获取数据失败")
-	}
-	//缓存
-	cache.Set(global.TronCoinAddressList, list1, 0)
 	return
 }

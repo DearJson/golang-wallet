@@ -14,6 +14,7 @@ import (
 	"gfast/app/common/service"
 	"gfast/app/system/dao"
 	"gfast/app/system/model"
+
 	"github.com/gogf/gf/errors/gerror"
 	"github.com/gogf/gf/frame/g"
 	"github.com/gogf/gf/util/gconv"
@@ -140,108 +141,108 @@ func (s *address) DeleteByIds(ctx context.Context, ids []int) (err error) {
 
 func (s *address) GetBnbAllAddress(ctx context.Context) (list []string, err error) {
 	cache := service.Cache.New()
-	//从缓存获取
-	iList := cache.Get(global.BscUserAddressList)
-	if iList != nil {
-		err = gconv.Struct(iList, &list)
-		return
+
+	result := cache.GetOrSetFuncLock(global.BscUserAddressList, func() (interface{}, error) {
+		stsd, err := dao.Address.Ctx(ctx).Where(dao.Address.Columns.MainChain, "bsc").FindArray(dao.Address.Columns.Address)
+		if err != nil {
+			g.Log().Error(err)
+			return nil, err
+		}
+		return gconv.SliceStr(stsd), nil
+	}, 0, nil)
+
+	if result != nil {
+		err = gconv.Struct(result, &list)
 	}
-	stsd, _ := dao.Address.Ctx(ctx).Where(dao.Address.Columns.MainChain, "bsc").FindArray(dao.Address.Columns.Address)
-	list = gconv.SliceStr(stsd)
-	if err != nil {
-		g.Log().Error(err)
-	}
-	//缓存
-	cache.Set(global.BscUserAddressList, list, 0)
 	return
 }
 
 func (s *address) GetEthAllAddress(ctx context.Context) (list []string, err error) {
 	cache := service.Cache.New()
-	//从缓存获取
-	iList := cache.Get(global.EthUserAddressList)
-	if iList != nil {
-		err = gconv.Struct(iList, &list)
-		return
+
+	result := cache.GetOrSetFuncLock(global.EthUserAddressList, func() (interface{}, error) {
+		stsd, err := dao.Address.Ctx(ctx).Where(dao.Address.Columns.MainChain, "eth").FindArray(dao.Address.Columns.Address)
+		if err != nil {
+			g.Log().Error(err)
+			return nil, err
+		}
+		return gconv.SliceStr(stsd), nil
+	}, 0, nil)
+
+	if result != nil {
+		err = gconv.Struct(result, &list)
 	}
-	stsd, _ := dao.Address.Ctx(ctx).Where(dao.Address.Columns.MainChain, "eth").FindArray(dao.Address.Columns.Address)
-	list = gconv.SliceStr(stsd)
-	if err != nil {
-		g.Log().Error(err)
-	}
-	//缓存
-	cache.Set(global.EthUserAddressList, list, 0)
 	return
 }
 
 func (s *address) GetNacAllAddress(ctx context.Context) (list []string, err error) {
 	cache := service.Cache.New()
-	//从缓存获取
-	iList := cache.Get(global.NacUserAddressList)
-	if iList != nil {
-		err = gconv.Struct(iList, &list)
-		return
+
+	result := cache.GetOrSetFuncLock(global.NacUserAddressList, func() (interface{}, error) {
+		stsd, err := dao.Address.Ctx(ctx).Where(dao.Address.Columns.MainChain, "nac").FindArray(dao.Address.Columns.Address)
+		if err != nil {
+			g.Log().Error(err)
+			return nil, err
+		}
+		return gconv.SliceStr(stsd), nil
+	}, 0, nil)
+
+	if result != nil {
+		err = gconv.Struct(result, &list)
 	}
-	stsd, _ := dao.Address.Ctx(ctx).Where(dao.Address.Columns.MainChain, "nac").FindArray(dao.Address.Columns.Address)
-	list = gconv.SliceStr(stsd)
-	if err != nil {
-		g.Log().Error(err)
-	}
-	//缓存
-	cache.Set(global.NacUserAddressList, list, 0)
 	return
 }
 
 func (s *address) GetHecoAllAddress(ctx context.Context) (list []string, err error) {
 	cache := service.Cache.New()
-	//从缓存获取
-	iList := cache.Get(global.HecoUserAddressList)
-	if iList != nil {
-		err = gconv.Struct(iList, &list)
-		return
+
+	result := cache.GetOrSetFuncLock(global.HecoUserAddressList, func() (interface{}, error) {
+		stsd, err := dao.Address.Ctx(ctx).Where(dao.Address.Columns.MainChain, "heco").FindArray(dao.Address.Columns.Address)
+		if err != nil {
+			g.Log().Error(err)
+			return nil, err
+		}
+		return gconv.SliceStr(stsd), nil
+	}, 0, nil)
+
+	if result != nil {
+		err = gconv.Struct(result, &list)
 	}
-	stsd, _ := dao.Address.Ctx(ctx).Where(dao.Address.Columns.MainChain, "heco").FindArray(dao.Address.Columns.Address)
-	list = gconv.SliceStr(stsd)
-	if err != nil {
-		g.Log().Error(err)
-	}
-	//缓存
-	cache.Set(global.HecoUserAddressList, list, 0)
 	return
 }
 
 func (s *address) GetWemixAllAddress(ctx context.Context) (list []string, err error) {
 	cache := service.Cache.New()
-	//从缓存获取
-	iList := cache.Get(global.WemixUserAddressList)
-	if iList != nil {
-		err = gconv.Struct(iList, &list)
-		return
+
+	result := cache.GetOrSetFuncLock(global.WemixUserAddressList, func() (interface{}, error) {
+		stsd, err := dao.Address.Ctx(ctx).Where(dao.Address.Columns.MainChain, "wemix").FindArray(dao.Address.Columns.Address)
+		if err != nil {
+			g.Log().Error(err)
+			return nil, err
+		}
+		return gconv.SliceStr(stsd), nil
+	}, 0, nil)
+
+	if result != nil {
+		err = gconv.Struct(result, &list)
 	}
-	stsd, _ := dao.Address.Ctx(ctx).Where(dao.Address.Columns.MainChain, "wemix").FindArray(dao.Address.Columns.Address)
-	list = gconv.SliceStr(stsd)
-	if err != nil {
-		g.Log().Error(err)
-	}
-	//缓存
-	cache.Set(global.WemixUserAddressList, list, 0)
 	return
 }
 
 func (s *address) GetTronAllAddress(ctx context.Context) (list []string, err error) {
 	cache := service.Cache.New()
-	//从缓存获取
-	iList := cache.Get(global.TronUserAddressList)
-	if iList != nil {
-		err = gconv.Struct(iList, &list)
-		return
+
+	result := cache.GetOrSetFuncLock(global.TronUserAddressList, func() (interface{}, error) {
+		stsd, err := dao.Address.Ctx(ctx).Where(dao.Address.Columns.MainChain, "tron").FindArray(dao.Address.Columns.Address)
+		if err != nil {
+			g.Log().Error(err)
+			return nil, err
+		}
+		return gconv.SliceStr(stsd), nil
+	}, 0, nil)
+
+	if result != nil {
+		err = gconv.Struct(result, &list)
 	}
-	stsd, _ := dao.Address.Ctx(ctx).Where(dao.Address.Columns.MainChain, "tron").FindArray(dao.Address.Columns.Address)
-	list = gconv.SliceStr(stsd)
-	if err != nil {
-		g.Log().Error(err)
-	}
-	//缓存
-	cache.Set(global.TronUserAddressList, list, 0)
 	return
 }
