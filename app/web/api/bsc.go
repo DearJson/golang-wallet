@@ -20,6 +20,12 @@ import (
 	webDao "gfast/app/web/dao"
 	"gfast/library"
 	"gfast/rpc"
+	"math"
+	"math/big"
+	"math/rand"
+	"strings"
+	"time"
+
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -35,11 +41,6 @@ import (
 	"github.com/snowbai/uniswapv3-sdk/examples/helper"
 	"github.com/storyicon/sigverify"
 	"golang.org/x/crypto/sha3"
-	"math"
-	"math/big"
-	"math/rand"
-	"strings"
-	"time"
 )
 
 type bsc struct {
@@ -259,11 +260,17 @@ func (b *bsc) BalanceOf(r *ghttp.Request) {
 	client, _ := ethclient.Dial(rpcUrl)
 
 	if r.GetPost("contract_address") == "0x1000000000000000000000000000000000000000" {
+		// 查询原生币(BNB)余额，使用18位精度
 		balance, _ := client.BalanceAt(context.Background(), common.HexToAddress(gconv.String(r.GetPost("address"))), nil)
+		// 转换为可读格式 (18位精度)
+		formattedBalance := decimal.NewFromBigInt(balance, 0).DivRound(decimal.NewFromFloat(math.Pow(10, 18)), 18).String()
 		result := make(map[string]string)
-		result["balance"] = gconv.String(balance.String())
+		result["balance"] = formattedBalance
+		result["balance_raw"] = balance.String()
+		result["decimals"] = "18"
 		b.SusJsonExit(r, result)
 	} else {
+		// 查询ERC20代币余额
 		erc20Contract, err := erc20.NewErc20AbiCaller(common.HexToAddress(gconv.String(r.GetPost("contract_address"))), client)
 		if err != nil {
 			b.FailJsonExit(r, "查询失败")
@@ -274,9 +281,23 @@ func (b *bsc) BalanceOf(r *ghttp.Request) {
 			BlockNumber: nil,
 			Context:     nil,
 		}
+
+		// 获取代币余额
 		balance, _ := erc20Contract.BalanceOf(transactOpts, common.HexToAddress(gconv.String(r.GetPost("address"))))
+
+		// 获取代币精度
+		decimals, err := erc20Contract.Decimals(transactOpts)
+		if err != nil {
+			b.FailJsonExit(r, "获取代币精度失败")
+		}
+
+		// 转换为可读格式
+		formattedBalance := decimal.NewFromBigInt(balance, 0).DivRound(decimal.NewFromFloat(math.Pow(10, float64(decimals))), int32(decimals)).String()
+
 		result := make(map[string]string)
-		result["balance"] = gconv.String(balance.String())
+		result["balance"] = formattedBalance
+		result["balance_raw"] = balance.String()
+		result["decimals"] = gconv.String(decimals)
 		b.SusJsonExit(r, result)
 	}
 }
