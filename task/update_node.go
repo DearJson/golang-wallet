@@ -9,7 +9,7 @@ func UpdateNode() {
 	//node := g.Client().Timeout(3 * time.Second).GetContent("http://119.23.187.205/getNodes")
 	//if node != "" {
 	cache := service.Cache.New()
-	cache.Set("bnb_rpc_url", "https://rpc.juchain.org", 0)
+	cache.Set("bnb_rpc_url", "https://bsc-mainnet.infura.io/v3/c774de5266cf40b688ed2a90b355d06a", 0)
 	//}
 	cache.Set("tron_rpc_url", "grpc.trongrid.io:50051", 0)
 	cache.Set("eth_rpc_url", "http://154.91.90.118:8599", 0)

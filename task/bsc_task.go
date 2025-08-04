@@ -253,12 +253,6 @@ func isValidTransaction(tx rpc.BscTransactions) bool {
 		return false
 	}
 
-	// 检查gas价格是否合理（避免异常交易）
-	gasPrice := gconv.Int64(tx.GasPrice)
-	if gasPrice <= 0 {
-		return false
-	}
-
 	// 检查交易金额（可以根据需要调整最小金额阈值）
 	value := gconv.Int64(tx.Value)
 	if value < 0 {

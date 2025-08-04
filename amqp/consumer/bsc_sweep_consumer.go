@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"gfast/app/common/service"
 	"gfast/app/system/dao"
+	"gfast/app/system/model"
 	sservice "gfast/app/system/service"
 	"gfast/library"
 	"gfast/rpc"
@@ -375,11 +376,11 @@ func contractRechargeHandle(transfer *rpc.BscTransactions) (err error) {
 	status = 3
 
 	//检查如果hash不存在，则可新增
-	exists, err := sservice.Recharge.GetInfoByHash(ctx, transfer.Hash)
+	existsRecharge, err := sservice.Recharge.GetInfoByHash(ctx, transfer.Hash)
 	if err != nil {
 		return err
 	}
-	if exists == nil {
+	if existsRecharge == nil {
 		data1 := dao.RechargeAddReq{MainChain: "bsc", BlockHash: transfer.BlockHash, CoinToken: coinToken, CoinToken1: coinToken1, FromAddress: fromAddress, ToAddress: toAddress, Amount: amount, Amount1: amount1, ContractAddress: contractAddress,
 			ContractAddress1: contractAddress1, Hash: transfer.Hash, BlockHeight: blockHeight, Status: status, Remarks: remarks, RechargeType: rechargeType, TokenId: tokenId,
 			CustomeUser: customeUser, CustomeCoin: customeCoin, CustomeAmount: customeAmount}
@@ -393,6 +394,9 @@ func contractRechargeHandle(transfer *rpc.BscTransactions) (err error) {
 	return nil
 }
 
+// ERC20 Transfer事件的签名哈希
+const ERC20_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+
 func addressRechargeHandle(transfer *rpc.BscTransactions) (err error) {
 	ctx := gctx.New()
 	userAddress, err := sservice.Address.GetBnbAllAddress(ctx)
@@ -403,106 +407,279 @@ func addressRechargeHandle(transfer *rpc.BscTransactions) (err error) {
 	if err != nil {
 		return err
 	}
-	isContract := transfer.Input != "0x"
 
-	//检查如果是转账代币，如果不是
-	functionName := library.SubStr(transfer.Input, 0, 10)
-	if isContract && functionName != "0xa9059cbb" {
+	//检查交易状态
+	client := rpc.BscClient{}
+	data, err := client.Init().GetTransferStatus(transfer.Hash)
+	if err != nil {
+		g.Log().Printf("查询交易%v失败，%v# \n", transfer.Hash, err)
+		return err
+	}
+	bscStruct := rpc.BscTransferDetail{}
+	err = mapstructure.Decode(data, &bscStruct)
+	if err != nil || bscStruct.Status == "" {
+		g.Log().Printf("查询交易%v失败，%v# \n", transfer.Hash, err)
+		return err
+	}
+	if bscStruct.Status == "0x0" {
+		g.Log().Printf("交易状态是失败的，不处理，%v# \n", transfer.Hash, err)
 		return nil
 	}
-	contractAddress := ""
-	if isContract {
-		contractAddress = transfer.To
-	} else {
-		contractAddress = "0x1000000000000000000000000000000000000000"
+
+	// 检查是否是直接的主币转账（BNB）
+	isMainCoinTransfer := transfer.Input == "0x"
+	if isMainCoinTransfer {
+		return handleMainCoinTransfer(transfer, userAddress, coinAddress, &bscStruct)
 	}
-	if _, ok := coinAddress[contractAddress]; ok == false {
+
+	// 检查是否是通过Transfer事件的代币转账
+	transferEvents := parseTransferEvents(bscStruct.Logs, userAddress, coinAddress)
+	if len(transferEvents) > 0 {
+		return handleTokenTransferByEvents(transfer, transferEvents, &bscStruct)
+	}
+
+	// 兼容原有的直接ERC20 transfer调用逻辑
+	functionName := library.SubStr(transfer.Input, 0, 10)
+	if functionName == "0xa9059cbb" {
+		return handleDirectTokenTransfer(transfer, userAddress, coinAddress, &bscStruct)
+	}
+
+	return nil
+}
+
+// TransferEvent 代币转账事件信息
+type TransferEvent struct {
+	ContractAddress string
+	FromAddress     string
+	ToAddress       string
+	Amount          string
+	CoinToken       string
+	Decimals        int
+}
+
+// parseTransferEvents 解析Transfer事件日志，返回匹配的转账事件
+func parseTransferEvents(logs []rpc.BscTransferDetailLog, userAddressMap []string, coinAddressMap map[string]*model.Currency) []TransferEvent {
+	var transferEvents []TransferEvent
+	userAddressSet := make(map[string]bool)
+	for _, addr := range userAddressMap {
+		userAddressSet[strings.ToLower(addr)] = true
+	}
+
+	for _, log := range logs {
+		// 检查是否为Transfer事件
+		if len(log.Topics) >= 3 && strings.ToLower(log.Topics[0]) == strings.ToLower(ERC20_TRANSFER_TOPIC) {
+			// Transfer事件格式: Transfer(address indexed from, address indexed to, uint256 value)
+			// topics[0]: 事件签名
+			// topics[1]: from地址
+			// topics[2]: to地址
+			// data: 转账金额
+
+			contractAddress := strings.ToLower(log.Address)
+
+			// 检查是否为我们关注的币种
+			coinInfo, isValidCoin := coinAddressMap[contractAddress]
+			if !isValidCoin {
+				continue
+			}
+
+			// 解析from地址 (去掉0x前缀，取后40位，补0x前缀)
+			fromAddressTopic := log.Topics[1]
+			fromAddress := "0x" + fromAddressTopic[len(fromAddressTopic)-40:]
+
+			// 解析to地址
+			toAddressTopic := log.Topics[2]
+			toAddress := "0x" + toAddressTopic[len(toAddressTopic)-40:]
+			toAddressLower := strings.ToLower(toAddress)
+
+			// 检查是否转给我们关注的用户地址
+			if userAddressSet[toAddressLower] {
+				// 解析转账金额
+				amountHex := log.Data
+				if amountHex == "0x" || amountHex == "" {
+					continue
+				}
+				amount := decimal.NewFromBigInt(library.HexToBigInt(amountHex), int32(-coinInfo.Decimals)).Truncate(int32(coinInfo.Decimals)).String()
+
+				transferEvent := TransferEvent{
+					ContractAddress: contractAddress,
+					FromAddress:     strings.ToLower(fromAddress),
+					ToAddress:       toAddressLower,
+					Amount:          amount,
+					CoinToken:       coinInfo.Name,
+					Decimals:        coinInfo.Decimals,
+				}
+				transferEvents = append(transferEvents, transferEvent)
+			}
+		}
+	}
+
+	return transferEvents
+}
+
+// handleMainCoinTransfer 处理主币（BNB）转账
+func handleMainCoinTransfer(transfer *rpc.BscTransactions, userAddress []string, coinAddress map[string]*model.Currency, bscStruct *rpc.BscTransferDetail) error {
+	ctx := gctx.New()
+	toAddress := strings.ToLower(transfer.To)
+
+	// 检查是否转给我们关注的地址
+	isValidToAddress := false
+	for _, addr := range userAddress {
+		if strings.ToLower(addr) == toAddress {
+			isValidToAddress = true
+			break
+		}
+	}
+	if !isValidToAddress {
+		return nil
+	}
+
+	// BNB的合约地址标识
+	contractAddress := "0x1000000000000000000000000000000000000000"
+	coinInfo, exists := coinAddress[contractAddress]
+	if !exists {
 		return nil
 	}
 
 	fromAddress := transfer.From
-	var (
-		coinToken    string
-		amount       string
-		rechargeType int8
-		toAddress    string
-		status       int8
-	)
-
-	//代币充值
-	if isContract {
-		toAddress = "0x" + library.StrPadLeft(strings.TrimLeft(library.SubStr(transfer.Input, -128, 64), "0"), 40, "0")
-		if library.ElementIsInSlice(toAddress, userAddress) == false {
-			return nil
-		}
-		//检查交易状态
-		client := rpc.BscClient{}
-		data, err := client.Init().GetTransferStatus(transfer.Hash)
-		if err != nil {
-			g.Log().Printf("查询交易%v失败，%v# \n", transfer.Hash, err)
-			return err
-		}
-		bscStruct := rpc.BscTransferDetail{}
-		err = mapstructure.Decode(data, &bscStruct)
-		if err != nil || bscStruct.Status == "" {
-			g.Log().Printf("查询交易%v失败，%v# \n", transfer.Hash, err)
-			return err
-		}
-		if bscStruct.Status == "0x0" {
-			g.Log().Printf("交易状态是失败的，不处理，%v# \n", transfer.Hash, err)
-			return nil
-		}
-		coinToken = coinAddress[contractAddress].Name
-		amountString := "0x" + strings.TrimLeft(library.SubStr(transfer.Input, -64, -1), "0")
-		if amountString == "0x" {
-			return nil
-		}
-		//amount = decimal.NewFromBigInt(library.HexToBigInt(amountString), 0).Div(decimal.NewFromFloat(math.Pow(10, float64(coinAddress[contractAddress].Decimals)))).RoundFloor(int32(coinAddress[contractAddress].Decimals)).String()
-		//dapp-sus
-		//amount = decimal.NewFromBigInt(library.HexToBigInt(amountString), 0).DivRound(decimal.NewFromFloat(math.Pow(10, 18)), 18).Mul(decimal.NewFromFloat32(0.97)).Truncate(18).String()
-		amount = decimal.NewFromBigInt(library.HexToBigInt(amountString), int32(-(coinAddress[contractAddress].Decimals))).Truncate(int32(coinAddress[contractAddress].Decimals)).String()
-	} else {
-		toAddress = transfer.To
-		//检查交易状态
-		client := rpc.BscClient{}
-		data, err := client.Init().GetTransferStatus(transfer.Hash)
-		if err != nil {
-			g.Log().Printf("查询交易%v失败，%v# \n", transfer.Hash, err)
-			return err
-		}
-		bscStruct := rpc.BscTransferDetail{}
-		err = mapstructure.Decode(data, &bscStruct)
-		if err != nil || bscStruct.Status == "" {
-			g.Log().Printf("查询交易%v失败，%v# \n", transfer.Hash, err)
-			return err
-		}
-		if bscStruct.Status == "0x0" {
-			g.Log().Printf("交易状态是失败的，不处理，%v# \n", transfer.Hash, err)
-			return nil
-		}
-		coinToken = "BNB"
-		amountString := transfer.Value
-		amount = decimal.NewFromBigInt(library.HexToBigInt(amountString), int32(-(coinAddress[contractAddress].Decimals))).Truncate(int32(coinAddress[contractAddress].Decimals)).String()
-	}
-	status = 1
-	rechargeType = 1
+	coinToken := "BNB"
+	amount := decimal.NewFromBigInt(library.HexToBigInt(transfer.Value), int32(-coinInfo.Decimals)).Truncate(int32(coinInfo.Decimals)).String()
+	status := int8(1)
+	rechargeType := int8(1)
 	blockHeight := strconv.FormatUint(gconv.Uint64(library.HexToBigInt(transfer.BlockNumber)), 10)
+
 	//检查如果hash不存在，则可新增
-	exists, err := sservice.Recharge.GetInfoByHash(ctx, transfer.Hash)
+	existsRecharge, err := sservice.Recharge.GetInfoByHash(ctx, transfer.Hash)
 	if err != nil {
 		return err
 	}
-	if exists == nil {
-		data1 := dao.RechargeAddReq{MainChain: "bsc", BlockHash: transfer.BlockHash, CoinToken: coinToken, FromAddress: fromAddress, ToAddress: toAddress,
-			Amount: amount, ContractAddress: contractAddress, Hash: transfer.Hash, BlockHeight: blockHeight, RechargeType: rechargeType, Status: status}
+	if existsRecharge == nil {
+		data1 := dao.RechargeAddReq{
+			MainChain:       "bsc",
+			BlockHash:       transfer.BlockHash,
+			CoinToken:       coinToken,
+			FromAddress:     fromAddress,
+			ToAddress:       toAddress,
+			Amount:          amount,
+			ContractAddress: contractAddress,
+			Hash:            transfer.Hash,
+			BlockHeight:     blockHeight,
+			RechargeType:    rechargeType,
+			Status:          status,
+		}
 		err = sservice.Recharge.Add(ctx, &data1)
 		if err != nil {
 			g.Log().Printf("插入交易失败 %v \n", err)
 			return err
 		}
-		//if status == 3 {
 		sendNotify(&data1)
-		//}
+	}
+	return nil
+}
+
+// handleTokenTransferByEvents 处理通过事件检测到的代币转账
+func handleTokenTransferByEvents(transfer *rpc.BscTransactions, transferEvents []TransferEvent, bscStruct *rpc.BscTransferDetail) error {
+	ctx := gctx.New()
+	fromAddress := transfer.From
+	status := int8(1)
+	rechargeType := int8(1)
+	blockHeight := strconv.FormatUint(gconv.Uint64(library.HexToBigInt(transfer.BlockNumber)), 10)
+
+	// 处理每个检测到的转账事件
+	for _, event := range transferEvents {
+		//检查如果hash不存在，则可新增
+		existsRecharge, err := sservice.Recharge.GetInfoByHash(ctx, transfer.Hash)
+		if err != nil {
+			return err
+		}
+		if existsRecharge == nil {
+			data1 := dao.RechargeAddReq{
+				MainChain:       "bsc",
+				BlockHash:       transfer.BlockHash,
+				CoinToken:       event.CoinToken,
+				FromAddress:     fromAddress,
+				ToAddress:       event.ToAddress,
+				Amount:          event.Amount,
+				ContractAddress: event.ContractAddress,
+				Hash:            transfer.Hash,
+				BlockHeight:     blockHeight,
+				RechargeType:    rechargeType,
+				Status:          status,
+			}
+			err = sservice.Recharge.Add(ctx, &data1)
+			if err != nil {
+				g.Log().Printf("插入交易失败 %v \n", err)
+				return err
+			}
+			sendNotify(&data1)
+		}
+		// 只处理第一个匹配的转账事件，避免重复记录
+		break
+	}
+	return nil
+}
+
+// handleDirectTokenTransfer 处理直接的ERC20 transfer调用（兼容原有逻辑）
+func handleDirectTokenTransfer(transfer *rpc.BscTransactions, userAddress []string, coinAddress map[string]*model.Currency, bscStruct *rpc.BscTransferDetail) error {
+	ctx := gctx.New()
+	contractAddress := strings.ToLower(transfer.To)
+
+	// 检查是否为我们关注的币种
+	coinInfo, exists := coinAddress[contractAddress]
+	if !exists {
+		return nil
+	}
+
+	// 解析ERC20 transfer函数参数
+	toAddress := "0x" + library.StrPadLeft(strings.TrimLeft(library.SubStr(transfer.Input, -128, 64), "0"), 40, "0")
+
+	// 检查是否转给我们关注的地址
+	isValidToAddress := false
+	for _, addr := range userAddress {
+		if strings.ToLower(addr) == strings.ToLower(toAddress) {
+			isValidToAddress = true
+			break
+		}
+	}
+	if !isValidToAddress {
+		return nil
+	}
+
+	fromAddress := transfer.From
+	coinToken := coinInfo.Name
+	amountString := "0x" + strings.TrimLeft(library.SubStr(transfer.Input, -64, -1), "0")
+	if amountString == "0x" {
+		return nil
+	}
+	amount := decimal.NewFromBigInt(library.HexToBigInt(amountString), int32(-coinInfo.Decimals)).Truncate(int32(coinInfo.Decimals)).String()
+	status := int8(1)
+	rechargeType := int8(1)
+	blockHeight := strconv.FormatUint(gconv.Uint64(library.HexToBigInt(transfer.BlockNumber)), 10)
+
+	//检查如果hash不存在，则可新增
+	existsRecharge, err := sservice.Recharge.GetInfoByHash(ctx, transfer.Hash)
+	if err != nil {
+		return err
+	}
+	if existsRecharge == nil {
+		data1 := dao.RechargeAddReq{
+			MainChain:       "bsc",
+			BlockHash:       transfer.BlockHash,
+			CoinToken:       coinToken,
+			FromAddress:     fromAddress,
+			ToAddress:       strings.ToLower(toAddress),
+			Amount:          amount,
+			ContractAddress: contractAddress,
+			Hash:            transfer.Hash,
+			BlockHeight:     blockHeight,
+			RechargeType:    rechargeType,
+			Status:          status,
+		}
+		err = sservice.Recharge.Add(ctx, &data1)
+		if err != nil {
+			g.Log().Printf("插入交易失败 %v \n", err)
+			return err
+		}
+		sendNotify(&data1)
 	}
 	return nil
 }
