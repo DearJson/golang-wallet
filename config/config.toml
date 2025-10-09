@@ -32,7 +32,7 @@
 
 # Database.
 [database]
-    link  = "mysql:root:root@tcp(localhost:3307)/wallet"
+    link  = "mysql:root:root@tcp(localhost:3306)/wallet"
     charset   = "utf8mb4" #数据库编码
     debug = false ##开启debug
     dryRun = false #空跑
@@ -99,7 +99,7 @@
 #RabbitMQ连接
 [rabbitmq]
     host = "localhost"
-    port = "5672"
+    port = "5679"
     user = "guest"  ##用户
     password = "guest"  ##密码
     vhost = "/"
