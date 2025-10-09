@@ -1,8 +1,13 @@
 package main
 
 import (
+	"crypto/ecdsa"
+	"errors"
 	"fmt"
 	"gfast/library"
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/crypto"
+	"golang.org/x/crypto/sha3"
 )
 
 func main() {
@@ -14,8 +19,32 @@ func main() {
 	//amount := decimal.NewFromBigInt(library.HexToBigInt(amountString), int32(-(18))).Truncate(18).String()
 
 	//fmt.Printf("%s", amount)
+	//
+	//a, _ := library.DecryptByAes("cw9pO3X0LaKR3q7QGox3+hYWNqyrxjUmAKdrWzTgJzFzG/qofq5Xj29bjnUKTPZPAfem8vmaIAis0x0pnmYLj8CtqvykvIOuNey/Bwljw7pK7gmv/K1xuM8ivopUt1g9")
+	//
+	//fmt.Printf("%s\n", a)
 
-	a, _ := library.DecryptByAes("4eoLm8jt91FgXuhYnW3lNbtIubsecWGcs5crQn015R6LVN5wre5y8rZWV3OevphbXoiCFk7xc/ONIK9QmglbxdwJaz6S0zv3WLRvfIKlbOM=")
+	fmt.Printf("%s\n", library.NewGoogleAuth().GetSecret())
+	//a, b, err := generateAddress()
+	//fmt.Printf("地址： %v \n 私钥： %v \n 错误信息: %v", a, b, err)
+}
 
-	fmt.Printf("%s\n", a)
+func generateAddress() (string, string, error) {
+	privateKey, err := crypto.GenerateKey()
+	if err != nil {
+		return "", "", err
+	}
+	privateKeyBytes := crypto.FromECDSA(privateKey)
+	publicKey := privateKey.Public()
+	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
+	if !ok {
+		return "", "", errors.New("cannot assert type: publicKey is not of type *ecdsa.PublicKey")
+	}
+	address := crypto.PubkeyToAddress(*publicKeyECDSA).Hex()
+	hash := sha3.NewLegacyKeccak256()
+	publicKeyBytes := crypto.FromECDSAPub(publicKeyECDSA)
+	hash.Write(publicKeyBytes[1:])
+	address = hexutil.Encode(hash.Sum(nil)[12:])
+
+	return address, hexutil.Encode(privateKeyBytes)[2:], nil
 }

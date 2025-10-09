@@ -93,8 +93,9 @@ func bscSweepTask() {
 
 		// 优化：准备批量获取区块
 		blockNumbers := make([]int64, can)
+		startBlock := nowBlock + 1
 		for i := int64(0); i < can; i++ {
-			blockNumbers[i] = nowBlock + i
+			blockNumbers[i] = startBlock + i
 		}
 
 		fromBlock := blockNumbers[0]
@@ -168,6 +169,14 @@ func bscSweepTask() {
 					if valueTo == contractRechargeAddress {
 						needProcess = true
 						matchReason = "contract_recharge"
+					}
+				}
+
+				// 处理主币地址充值：直接匹配用户地址
+				if addressRecharge && !needProcess && value.To != "" {
+					if userAddressMap[strings.ToLower(value.To)] {
+						needProcess = true
+						matchReason = "user_native_transfer"
 					}
 				}
 
