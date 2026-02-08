@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"gfast/amqp"
 	_const "gfast/amqp/const"
@@ -218,15 +219,10 @@ func (s *solana) WebhookReceiver(r *ghttp.Request) {
 	hasMessage := false
 
 	for _, tx := range payload {
-		// 合约充值: 检查feePayer或相关账户是否涉及充值合约
+		// 合约充值: 检查交易中是否包含调用充值合约的 Deposit 指令（discriminator=1）
 		if contractRecharge && contractAddress != "" {
-			for _, acc := range tx.AccountData {
-				if acc.Account == contractAddress {
-					if processHeliusTransaction(mq, &tx, userAddrMap, coinMintSet, excludeFromAddrs, true) {
-						hasMessage = true
-					}
-					break
-				}
+			if processContractDeposit(mq, &tx, contractAddress, coinMintSet) {
+				hasMessage = true
 			}
 		}
 
@@ -243,6 +239,105 @@ func (s *solana) WebhookReceiver(r *ghttp.Request) {
 	}
 
 	r.Response.WriteStatusExit(200)
+}
+
+// processContractDeposit 处理合约充值：仅当交易包含 Deposit 指令（Borsh discriminator=1）时才记录
+// 合约指令数据格式: [0x01] + [amount: u64 LE 8字节] + [studio_wallet: Pubkey 32字节]
+// 合约账户顺序: [0]user, [1]user_usdt, [2]contract_usdt, [3]studio_usdt, [4]operation_usdt, [5]token_program, [6]state
+func processContractDeposit(mq *amqp.RabbitMQ, tx *rpc.HeliusEnhancedTransaction, contractAddress string, coinMintSet map[string]bool) bool {
+	produced := false
+
+	for _, ix := range tx.Instructions {
+		if ix.ProgramId != contractAddress {
+			continue
+		}
+
+		// Base58 解码指令数据
+		ixData, err := hdwallet.SolanaBase58Decode(ix.Data)
+		if err != nil || len(ixData) == 0 {
+			continue
+		}
+		// Deposit 指令 Borsh 布局:
+		// [0]     = discriminator 0x01
+		// [1-8]   = amount (u64 LE)
+		// [9-40]  = studio_wallet (Pubkey, 32 bytes)
+		// [41-44] = order_id 长度 (u32 LE)
+		// [45+]   = order_id UTF-8 内容
+		// 最小长度: 1 + 8 + 32 + 4 = 45 字节（order_id可为空字符串）
+		if len(ixData) < 45 || ixData[0] != 1 {
+			continue
+		}
+
+		// 解析充值金额（u64 小端序）— 仅用于校验非零
+		rawAmount := binary.LittleEndian.Uint64(ixData[1:9])
+		if rawAmount == 0 {
+			continue
+		}
+
+		// 解析 order_id（Borsh String = u32长度前缀 + UTF-8内容）
+		orderIdLen := binary.LittleEndian.Uint32(ixData[41:45])
+		orderId := ""
+		if orderIdLen > 0 {
+			if len(ixData) < 45+int(orderIdLen) {
+				g.Log().File("solana-producer.{Y-m-d}.log").Printf("Deposit指令数据不完整，order_id截断: sig=%v", tx.Signature)
+				continue
+			}
+			orderId = string(ixData[45 : 45+orderIdLen])
+		}
+
+		// 用户地址 = 指令的第一个账户（accounts[0]）
+		if len(ix.Accounts) < 1 {
+			continue
+		}
+		userAddress := ix.Accounts[0]
+
+		// 从 tokenTransfers 中累加用户的总转出金额（Helius tokenAmount 已经是人类可读值，含精度转换）
+		// 合约 Deposit 会将用户资金拆分到多个接收方（平台/工作室/运营/合约），需要求和还原总金额
+		mint := ""
+		totalAmount := decimal.NewFromInt(0)
+		for _, tt := range tx.TokenTransfers {
+			if tt.FromUserAccount == userAddress {
+				if mint == "" {
+					mint = tt.Mint
+				}
+				totalAmount = totalAmount.Add(decimal.NewFromFloat(tt.TokenAmount))
+			}
+		}
+
+		if totalAmount.IsZero() {
+			g.Log().File("solana-producer.{Y-m-d}.log").Printf("合约Deposit未找到用户tokenTransfer: user=%v, sig=%v", userAddress, tx.Signature)
+			continue
+		}
+
+		// 如果配置了币种列表，检查 Mint 是否在列表中
+		if mint != "" && len(coinMintSet) > 0 && !coinMintSet[mint] {
+			g.Log().File("solana-producer.{Y-m-d}.log").Printf("合约Deposit mint不在币种列表: %v, sig: %v", mint, tx.Signature)
+			continue
+		}
+
+		// 使用 Helius tokenAmount 累加值（人类可读，与地址入金一致）
+		amountStr := totalAmount.String()
+
+		solTx := rpc.SolanaTransaction{
+			Signature:       tx.Signature,
+			FromAddress:     userAddress,
+			ToAddress:       contractAddress,
+			Amount:          amountStr,
+			Mint:            mint,
+			IsToken:         true,
+			Slot:            tx.Slot,
+			BlockHash:       "",
+			Timestamp:       tx.Timestamp,
+			TransactionType: "CONTRACT_DEPOSIT",
+			OrderId:         orderId,
+		}
+		dd, _ := json.Marshal(solTx)
+		mq.RegisterProducer(&producer.SolanaProducer{Msg: string(dd)})
+		g.Log().File("solana-producer.{Y-m-d}.log").Printf("Webhook生产 合约Deposit user=%v, amount=%v, mint=%v, order_id=%v, sig: %v", userAddress, amountStr, mint, orderId, tx.Signature)
+		produced = true
+	}
+
+	return produced
 }
 
 // processHeliusTransaction 处理Helius增强交易数据，将匹配的交易投入MQ

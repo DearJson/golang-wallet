@@ -9,6 +9,8 @@ import (
 	_ "gfast/router"
 	"gfast/rpc"
 	"gfast/task"
+	"os"
+	"strings"
 
 	"github.com/gogf/gf/frame/g"
 	"github.com/gogf/gf/os/gctx"
@@ -223,13 +225,48 @@ func initSolanaWebhook() {
 		}
 
 		// 确保Webhook存在并同步地址
+		configWebhookID := g.Config().GetString("helius.webhook_id")
 		webhookID, err := client.EnsureWebhookExists(webhookURL, addresses)
 		if err != nil {
 			g.Log().Printf("初始化Solana Webhook失败: %v", err)
 			return
 		}
 		g.Log().Printf("Solana Webhook初始化成功, ID: %s, 监控地址数: %d", webhookID, len(addresses))
+
+		// 首次创建时自动回写webhook_id到配置文件
+		if configWebhookID == "" && webhookID != "" {
+			if err := saveWebhookIDToConfig(webhookID); err != nil {
+				g.Log().Printf("自动回写webhook_id到配置文件失败: %v，请手动配置 helius.webhook_id = \"%s\"", err, webhookID)
+			} else {
+				g.Log().Printf("已自动将webhook_id写入配置文件: %s", webhookID)
+			}
+		}
 	}()
+}
+
+// saveWebhookIDToConfig 将Webhook ID回写到config.toml配置文件
+func saveWebhookIDToConfig(webhookID string) error {
+	configPath := g.Config().GetFileName()
+	if configPath == "" {
+		configPath = "config/config.toml"
+	}
+
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		return err
+	}
+
+	// 替换 webhook_id = "" 为实际值
+	oldStr := `webhook_id = ""`
+	newStr := `webhook_id = "` + webhookID + `"`
+	newContent := strings.Replace(string(content), oldStr, newStr, 1)
+
+	if newContent == string(content) {
+		// 没有变化，可能已经有值了
+		return nil
+	}
+
+	return os.WriteFile(configPath, []byte(newContent), 0644)
 }
 
 func authorizeBscSweepConsume() {

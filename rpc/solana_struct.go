@@ -33,13 +33,14 @@ type SolanaTransaction struct {
 	ToAddress       string  `json:"to_address"`
 	Amount          string  `json:"amount"`
 	Decimals        uint8   `json:"decimals"`
-	Mint            string  `json:"mint"`             // SPL Token Mint地址，空表示SOL
-	IsToken         bool    `json:"is_token"`         // 是否是SPL Token交易
+	Mint            string  `json:"mint"`     // SPL Token Mint地址，空表示SOL
+	IsToken         bool    `json:"is_token"` // 是否是SPL Token交易
 	Slot            uint64  `json:"slot"`
 	BlockHash       string  `json:"block_hash"`
 	Timestamp       int64   `json:"timestamp"`
-	TransactionType string  `json:"transaction_type"` // TRANSFER / UNKNOWN
+	TransactionType string  `json:"transaction_type"` // TRANSFER / UNKNOWN / CONTRACT_DEPOSIT
 	Fee             float64 `json:"fee"`
+	OrderId         string  `json:"order_id,omitempty"` // 合约充值订单号（从Deposit指令解析）
 }
 
 // ==================== Helius Webhook 回调数据结构 ====================
@@ -54,6 +55,7 @@ type HeliusEnhancedTransaction struct {
 	Events          map[string]interface{} `json:"events"`
 	Fee             int64                  `json:"fee"`
 	FeePayer        string                 `json:"feePayer"`
+	Instructions    []HeliusInstruction    `json:"instructions"`
 	NativeTransfers []HeliusNativeTransfer `json:"nativeTransfers"`
 	Signature       string                 `json:"signature"`
 	Slot            uint64                 `json:"slot"`
@@ -61,6 +63,14 @@ type HeliusEnhancedTransaction struct {
 	Timestamp       int64                  `json:"timestamp"`
 	TokenTransfers  []HeliusTokenTransfer  `json:"tokenTransfers"`
 	Type            string                 `json:"type"`
+}
+
+// HeliusInstruction Helius交易指令
+type HeliusInstruction struct {
+	Accounts          []string            `json:"accounts"`
+	Data              string              `json:"data"` // Base58编码的指令数据
+	ProgramId         string              `json:"programId"`
+	InnerInstructions []HeliusInstruction `json:"innerInstructions"`
 }
 
 // HeliusNativeTransfer SOL原生转账
@@ -86,8 +96,8 @@ type HeliusAccountData struct {
 	Account             string `json:"account"`
 	NativeBalanceChange int64  `json:"nativeBalanceChange"`
 	TokenBalanceChanges []struct {
-		Mint            string `json:"mint"`
-		RawTokenAmount  struct {
+		Mint           string `json:"mint"`
+		RawTokenAmount struct {
 			Decimals    uint8  `json:"decimals"`
 			TokenAmount string `json:"tokenAmount"`
 		} `json:"rawTokenAmount"`
@@ -141,10 +151,10 @@ type SolanaTokenAccountResult struct {
 
 // SolanaSignatureStatus getSignatureStatuses 响应
 type SolanaSignatureStatus struct {
-	Slot               uint64  `json:"slot"`
-	Confirmations      *uint64 `json:"confirmations"`
+	Slot               uint64      `json:"slot"`
+	Confirmations      *uint64     `json:"confirmations"`
 	Err                interface{} `json:"err"`
-	ConfirmationStatus string  `json:"confirmationStatus"`
+	ConfirmationStatus string      `json:"confirmationStatus"`
 }
 
 // SolanaSignatureInfo getSignaturesForAddress 响应

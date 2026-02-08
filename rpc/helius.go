@@ -70,7 +70,7 @@ func (c *HeliusClient) CreateWebhook(config *HeliusWebhookConfig) (*HeliusWebhoo
 		return nil, fmt.Errorf("read response error: %v", err)
 	}
 
-	if resp.StatusCode != 200 {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("create webhook failed [%d]: %s", resp.StatusCode, string(body))
 	}
 
@@ -96,7 +96,7 @@ func (c *HeliusClient) GetWebhook(webhookID string) (*HeliusWebhookResponse, err
 		return nil, fmt.Errorf("read response error: %v", err)
 	}
 
-	if resp.StatusCode != 200 {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("get webhook failed [%d]: %s", resp.StatusCode, string(body))
 	}
 
@@ -134,7 +134,7 @@ func (c *HeliusClient) UpdateWebhook(webhookID string, config *HeliusWebhookConf
 		return nil, fmt.Errorf("read response error: %v", err)
 	}
 
-	if resp.StatusCode != 200 {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("update webhook failed [%d]: %s", resp.StatusCode, string(body))
 	}
 
@@ -161,7 +161,7 @@ func (c *HeliusClient) DeleteWebhook(webhookID string) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 200 {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := ioutil.ReadAll(resp.Body)
 		return fmt.Errorf("delete webhook failed [%d]: %s", resp.StatusCode, string(body))
 	}

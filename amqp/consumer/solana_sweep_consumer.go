@@ -95,6 +95,12 @@ func (s *SolanaSweepConsumer) Consumer(dataByte []byte, key uint64) error {
 		status = 1
 	}
 
+	// 合约充值订单号写入备注
+	remarks := ""
+	if solTx.OrderId != "" {
+		remarks = solTx.OrderId
+	}
+
 	// 写入充值记录
 	data := dao.RechargeAddReq{
 		MainChain:       "solana",
@@ -108,6 +114,7 @@ func (s *SolanaSweepConsumer) Consumer(dataByte []byte, key uint64) error {
 		BlockHeight:     gconv.String(solTx.Slot),
 		Status:          status,
 		RechargeType:    rechargeType,
+		Remarks:         remarks,
 	}
 	err = sservice.Recharge.Add(ctx, &data)
 	if err != nil {

@@ -2,6 +2,8 @@ package task
 
 import (
 	"gfast/app/common/service"
+
+	"github.com/gogf/gf/frame/g"
 )
 
 // UpdateNode 更新节点
@@ -13,7 +15,12 @@ func UpdateNode() {
 	//}
 	cache.Set("tron_rpc_url", "grpc.trongrid.io:50051", 0)
 	cache.Set("eth_rpc_url", "https://rpc.naaidepin.co", 0)
-	cache.Set("solana_rpc_url", "https://api.mainnet-beta.solana.com", 0)
+	heliusApiKey := g.Config().GetString("helius.api_key")
+	if heliusApiKey != "" {
+		cache.Set("solana_rpc_url", "https://mainnet.helius-rpc.com/?api-key="+heliusApiKey, 0)
+	} else {
+		cache.Set("solana_rpc_url", "https://api.mainnet-beta.solana.com", 0)
+	}
 	//tronNode := g.Client().Timeout(3 * time.Second).GetContent("http://119.23.187.205/getTronNodes")
 	//if tronNode != "" {
 	//	cache := service.Cache.New()
