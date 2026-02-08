@@ -5,12 +5,13 @@ import (
 	"gfast/app/system/model"
 	"gfast/library"
 	"gfast/rpc"
+	"net/url"
+
 	"github.com/fbsobreira/gotron-sdk/pkg/proto/core"
 	"github.com/gogf/gf/frame/g"
 	"github.com/gogf/gf/os/gtime"
 	"github.com/gogf/gf/util/gconv"
 	"github.com/mitchellh/mapstructure"
-	"net/url"
 )
 
 // 检查
@@ -32,6 +33,9 @@ func checkStatusTask() {
 	}
 	if g.Config().GetBool("nac.address_recharge") {
 		nacCheckStatus()
+	}
+	if g.Config().GetBool("solana.address_recharge") || g.Config().GetBool("solana.contract_recharge") {
+		solanaCheckStatus()
 	}
 }
 
@@ -505,6 +509,89 @@ func wemixCheckStatus() {
 			sendNotify(recharge)
 		} else {
 			g.Model("fee_list").Data(g.Map{"status": 4}).Where("id", recharge.Id).Update()
+		}
+	}
+}
+
+// solanaCheckStatus 检查Solana相关任务状态
+func solanaCheckStatus() {
+	// 检查提现状态
+	var withdrawList []*model.Withdraw
+	g.Model("withdraw").Where("main_chain", "solana").Where("status", 3).Scan(&withdrawList)
+
+	for _, withdraw := range withdrawList {
+		status, err := rpc.SolanaClient.GetSignatureStatus(withdraw.Hash)
+		if err != nil || status == nil {
+			// 超过5分钟未找到则判定为失败
+			if gtime.Timestamp()-withdraw.UpdatedAt.Timestamp() >= 300 {
+				hashKey := library.Md5Data(withdraw.Address, withdraw.ContractAddress, withdraw.Amount, 4, withdraw.Nonce1)
+				g.Model("withdraw").Data(g.Map{"status": 4, "hashKey": hashKey}).Where("id", withdraw.Id).Update()
+			}
+			continue
+		}
+		if status.Err != nil {
+			// 交易失败
+			hashKey := library.Md5Data(withdraw.Address, withdraw.ContractAddress, withdraw.Amount, 4, withdraw.Nonce1)
+			g.Model("withdraw").Data(g.Map{"status": 4, "hashKey": hashKey}).Where("id", withdraw.Id).Update()
+			continue
+		}
+		if status.ConfirmationStatus == "confirmed" || status.ConfirmationStatus == "finalized" {
+			g.Model("withdraw").Data(g.Map{"status": 5}).Where("id", withdraw.Id).Update()
+			if withdraw.NotifyUrl != "" {
+				data := url.Values{
+					"address":          {withdraw.Address},
+					"contract_address": {gconv.String(withdraw.ContractAddress)},
+					"amount":           {gconv.String(withdraw.Amount)},
+					"status":           {gconv.String(5)},
+					"remarks":          {withdraw.Remarks},
+					"hash":             {withdraw.Hash},
+				}
+				resp, _ := g.Client().PostForm(withdraw.NotifyUrl, data)
+				if resp != nil {
+					g.Log().File("callback.{Y-m-d}.log").Printf("发送Solana提现回调请求 请求域名:【%v】 请求参数:【%v】 返回code码【%v】", withdraw.NotifyUrl, data.Encode(), resp.StatusCode)
+					resp.Body.Close()
+				}
+			}
+		}
+	}
+
+	// 检查手续费状态
+	var feeList []*model.FeeList
+	g.Model("fee_list").Where("main_chain", "solana").Where("status", 1).Scan(&feeList)
+	for _, fee := range feeList {
+		status, err := rpc.SolanaClient.GetSignatureStatus(fee.Hash)
+		if err != nil || status == nil {
+			continue
+		}
+		if status.Err != nil {
+			g.Model("fee_list").Data(g.Map{"status": 3}).Where("id", fee.Id).Update()
+			continue
+		}
+		if status.ConfirmationStatus == "confirmed" || status.ConfirmationStatus == "finalized" {
+			g.Model("fee_list").Data(g.Map{"status": 2}).Where("id", fee.Id).Update()
+			g.Model("recharge").Data(g.Map{"status": 1}).Where("id", fee.RechargeId).Update()
+		}
+	}
+
+	// 检查归集状态
+	var rechargeList []*model.Recharge
+	g.Model("recharge").Where("main_chain", "solana").Where("status", 2).Scan(&rechargeList)
+	for _, recharge := range rechargeList {
+		status, err := rpc.SolanaClient.GetSignatureStatus(recharge.ImputationHash)
+		if err != nil || status == nil {
+			if gtime.Timestamp()-recharge.UpdatedAt.Timestamp() >= 300 {
+				g.Model("recharge").Data(g.Map{"status": 1}).Where("id", recharge.Id).Update()
+			}
+			continue
+		}
+		if status.Err != nil {
+			g.Model("recharge").Data(g.Map{"status": 4}).Where("id", recharge.Id).Update()
+			continue
+		}
+		if status.ConfirmationStatus == "confirmed" || status.ConfirmationStatus == "finalized" {
+			g.Model("recharge").Data(g.Map{"status": 3}).Where("id", recharge.Id).Update()
+			recharge.Status = 3
+			sendNotify(recharge)
 		}
 	}
 }

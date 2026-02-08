@@ -46,4 +46,8 @@ const (
 	BscAuthorizeSweepExName = "bsc_authorize_sweep" // 交换机名称
 	BscAuthorizeSweepExType = "topic"               // 交换机类型
 
+	SolanaSweepQuName = "solana_sweep" // 队列名称
+	SolanaSweepRtKey  = "solana_sweep" // key值
+	SolanaSweepExName = "solana_sweep" // 交换机名称
+	SolanaSweepExType = "topic"        // 交换机类型
 )

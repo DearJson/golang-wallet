@@ -3,6 +3,7 @@ package router
 import (
 	"gfast/app/web/api"
 	"gfast/middleware"
+
 	"github.com/gogf/gf/frame/g"
 	"github.com/gogf/gf/net/ghttp"
 )
@@ -118,6 +119,22 @@ func init() {
 			group.POST("/resetBlock", api.Nac.ResetBlock)
 		})
 
+		group.Group("/solana", func(group *ghttp.RouterGroup) {
+			//创建Solana地址
+			group.POST("/generateAddress", api.Solana.GenerateAddress)
+			//Solana提现代币
+			group.POST("/withdraw", api.Solana.Withdraw)
+			//查询余额
+			group.POST("/balanceOf", api.Solana.BalanceOf)
+			//写入要监控的地址
+			group.POST("/setAddress", api.Solana.SetAddress)
+		})
+
+	})
+
+	// Helius Webhook回调（独立于IP白名单中间件之外）
+	s.Group("/webhook", func(group *ghttp.RouterGroup) {
+		group.POST("/solana", api.Solana.WebhookReceiver)
 	})
 
 }

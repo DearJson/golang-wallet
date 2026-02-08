@@ -64,4 +64,9 @@ const (
 	EthUserAddressList = CachePrefix + "ethUserAddressList"
 	// EthCoinAddressList 缓存eth币种列表
 	EthCoinAddressList = CachePrefix + "ethCoinAddressList"
+
+	// SolanaUserAddressList 缓存solana用户列表
+	SolanaUserAddressList = CachePrefix + "solanaUserAddressList"
+	// SolanaCoinAddressList 缓存solana币种列表(SPL Token Mint地址)
+	SolanaCoinAddressList = CachePrefix + "solanaCoinAddressList"
 )

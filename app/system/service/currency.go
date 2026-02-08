@@ -103,6 +103,7 @@ func (s *currency) Add(ctx context.Context, req *dao.CurrencyAddReq) (err error)
 	cache.Remove(global.HecoCoinAddressList)
 	cache.Remove(global.WemixCoinAddressList)
 	cache.Remove(global.EthCoinAddressList)
+	cache.Remove(global.SolanaCoinAddressList)
 	return
 }
 
@@ -116,6 +117,7 @@ func (s *currency) Edit(ctx context.Context, req *dao.CurrencyEditReq) error {
 	cache.Remove(global.HecoCoinAddressList)
 	cache.Remove(global.WemixCoinAddressList)
 	cache.Remove(global.EthCoinAddressList)
+	cache.Remove(global.SolanaCoinAddressList)
 	return err
 }
 
@@ -136,6 +138,7 @@ func (s *currency) DeleteByIds(ctx context.Context, ids []int) (err error) {
 	cache.Remove(global.HecoCoinAddressList)
 	cache.Remove(global.WemixCoinAddressList)
 	cache.Remove(global.EthCoinAddressList)
+	cache.Remove(global.SolanaCoinAddressList)
 	return
 }
 
@@ -249,6 +252,32 @@ func (s *currency) GetWemixCoinAddress(ctx context.Context) (list1 map[string]*m
 	result := cache.GetOrSetFuncLock(global.WemixCoinAddressList, func() (interface{}, error) {
 		var list []*model.Currency
 		err := dao.Currency.Ctx(ctx).Where(dao.Currency.Columns.MainChain, "wemix").Scan(&list)
+		if err != nil {
+			g.Log().Error(err)
+			return nil, gerror.New("获取数据失败")
+		}
+
+		mapResult := make(map[string]*model.Currency)
+		for _, value := range list {
+			mapResult[value.ContractAddress] = value
+		}
+		return mapResult, nil
+	}, 0, nil)
+
+	if result != nil {
+		err = gconv.Struct(result, &list1)
+	} else {
+		list1 = make(map[string]*model.Currency)
+	}
+	return
+}
+
+func (s *currency) GetSolanaCoinAddress(ctx context.Context) (list1 map[string]*model.Currency, err error) {
+	cache := service.Cache.New()
+
+	result := cache.GetOrSetFuncLock(global.SolanaCoinAddressList, func() (interface{}, error) {
+		var list []*model.Currency
+		err := dao.Currency.Ctx(ctx).Where(dao.Currency.Columns.MainChain, "solana").Scan(&list)
 		if err != nil {
 			g.Log().Error(err)
 			return nil, gerror.New("获取数据失败")

@@ -4,10 +4,14 @@ import (
 	"gfast/amqp"
 	_const "gfast/amqp/const"
 	"gfast/amqp/consumer"
+	"gfast/app/system/service"
 	_ "gfast/boot"
 	_ "gfast/router"
+	"gfast/rpc"
 	"gfast/task"
+
 	"github.com/gogf/gf/frame/g"
+	"github.com/gogf/gf/os/gctx"
 )
 
 // @title       GFast
@@ -52,6 +56,10 @@ func main() {
 	}
 	if g.Config().GetBool("eth.contract_recharge") || g.Config().GetBool("eth.address_recharge") {
 		ethSweepConsume()
+	}
+	if g.Config().GetBool("solana.address_recharge") || g.Config().GetBool("solana.contract_recharge") {
+		solanaSweepConsume()
+		initSolanaWebhook()
 	}
 
 	s := g.Server()
@@ -167,6 +175,61 @@ func nacSweepConsume() {
 		mq.RegisterReceiver(t)
 	}
 	mq.Start()
+}
+
+// solanaSweepConsume Solana扫块消费者（接收Helius Webhook推送的消息）
+func solanaSweepConsume() {
+	t := &(consumer.SolanaSweepConsumer{})
+	queueExchange := &amqp.QueueExchange{
+		QuName: _const.SolanaSweepQuName,
+		RtKey:  _const.SolanaSweepRtKey,
+		ExName: _const.SolanaSweepExName,
+		ExType: _const.SolanaSweepExType,
+	}
+	mq := amqp.New(queueExchange)
+	for i := 0; i < 2; i++ {
+		mq.RegisterReceiver(t)
+	}
+	mq.Start()
+}
+
+// initSolanaWebhook 启动时初始化Helius Webhook，确保Webhook存在并同步地址
+func initSolanaWebhook() {
+	webhookURL := g.Config().GetString("helius.webhook_url")
+	apiKey := g.Config().GetString("helius.api_key")
+	if webhookURL == "" || apiKey == "" {
+		g.Log().Println("Helius未配置webhook_url或api_key，跳过Webhook初始化")
+		return
+	}
+
+	go func() {
+		client := rpc.NewHeliusClient()
+
+		// 获取当前所有Solana用户地址
+		ctx := gctx.New()
+		addresses, err := service.Address.GetSolanaAllAddress(ctx)
+		if err != nil {
+			g.Log().Printf("获取Solana地址列表失败: %v", err)
+			addresses = []string{}
+		}
+
+		// 如果开启了合约充值，将充值合约Program ID也加入监控地址列表
+		if g.Config().GetBool("solana.contract_recharge") {
+			contractAddress := g.Config().GetString("solana.contract_address")
+			if contractAddress != "" {
+				addresses = append(addresses, contractAddress)
+				g.Log().Printf("Solana充值合约地址已加入Webhook监控: %s", contractAddress)
+			}
+		}
+
+		// 确保Webhook存在并同步地址
+		webhookID, err := client.EnsureWebhookExists(webhookURL, addresses)
+		if err != nil {
+			g.Log().Printf("初始化Solana Webhook失败: %v", err)
+			return
+		}
+		g.Log().Printf("Solana Webhook初始化成功, ID: %s, 监控地址数: %d", webhookID, len(addresses))
+	}()
 }
 
 func authorizeBscSweepConsume() {

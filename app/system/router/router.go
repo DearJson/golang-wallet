@@ -190,6 +190,10 @@ func init() {
 			group.Group("/ethAddress", func(group *ghttp.RouterGroup) {
 				group.GET("list", api.EthAddress.List)
 			})
+			//solana地址管理
+			group.Group("/solanaAddress", func(group *ghttp.RouterGroup) {
+				group.GET("list", api.SolanaAddress.List)
+			})
 
 			//币种管理
 			group.Group("/bscCurrency", func(group *ghttp.RouterGroup) {
@@ -235,6 +239,14 @@ func init() {
 				group.PUT("edit", api.WemixCurrency.Edit)
 				group.DELETE("delete", api.WemixCurrency.Delete)
 			})
+			//Solana币种管理
+			group.Group("/solanaCurrency", func(group *ghttp.RouterGroup) {
+				group.GET("list", api.SolanaCurrency.List)
+				group.GET("get", api.SolanaCurrency.Get)
+				group.POST("add", api.SolanaCurrency.Add)
+				group.PUT("edit", api.SolanaCurrency.Edit)
+				group.DELETE("delete", api.SolanaCurrency.Delete)
+			})
 
 			//币安手续费管理
 			group.Group("/bscFeelist", func(group *ghttp.RouterGroup) {
@@ -258,6 +270,10 @@ func init() {
 			//WEMIX手续费管理
 			group.Group("/wemixFeelist", func(group *ghttp.RouterGroup) {
 				group.GET("list", api.WemixFeeList.List)
+			})
+			//Solana手续费管理
+			group.Group("/solanaFeelist", func(group *ghttp.RouterGroup) {
+				group.GET("list", api.SolanaFeeList.List)
 			})
 
 			//币安充值管理
@@ -294,6 +310,12 @@ func init() {
 				group.GET("list", api.WemixRecharge.List)
 				group.GET("get", api.WemixRecharge.Get)
 				group.POST("callback", api.WemixRecharge.Callback)
+			})
+			//Solana充值管理
+			group.Group("/solanaRecharge", func(group *ghttp.RouterGroup) {
+				group.GET("list", api.SolanaRecharge.List)
+				group.GET("get", api.SolanaRecharge.Get)
+				group.POST("callback", api.SolanaRecharge.Callback)
 			})
 
 			//币安提现管理
@@ -348,6 +370,15 @@ func init() {
 				group.POST("auditSuccess", api.WemixWithdraw.AuditSuccess)
 				group.POST("auditFail", api.WemixWithdraw.AuditFail)
 				group.POST("withdraw", api.WemixWithdraw.Withdraw)
+			})
+			//Solana提现管理
+			group.Group("/solanaWithdraw", func(group *ghttp.RouterGroup) {
+				group.GET("list", api.SolanaWithdraw.List)
+				group.GET("get", api.SolanaWithdraw.Get)
+				group.POST("callback", api.SolanaWithdraw.Callback)
+				group.POST("auditSuccess", api.SolanaWithdraw.AuditSuccess)
+				group.POST("auditFail", api.SolanaWithdraw.AuditFail)
+				group.POST("withdraw", api.SolanaWithdraw.Withdraw)
 			})
 		})
 	})

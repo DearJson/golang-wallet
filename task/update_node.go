@@ -13,6 +13,7 @@ func UpdateNode() {
 	//}
 	cache.Set("tron_rpc_url", "grpc.trongrid.io:50051", 0)
 	cache.Set("eth_rpc_url", "https://rpc.naaidepin.co", 0)
+	cache.Set("solana_rpc_url", "https://api.mainnet-beta.solana.com", 0)
 	//tronNode := g.Client().Timeout(3 * time.Second).GetContent("http://119.23.187.205/getTronNodes")
 	//if tronNode != "" {
 	//	cache := service.Cache.New()

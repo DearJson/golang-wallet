@@ -78,6 +78,9 @@ func rechargeTask() {
 	if g.Cfg().GetBool("nac.address_recharge") {
 		nacRecharge()
 	}
+	if g.Cfg().GetBool("solana.address_recharge") || g.Cfg().GetBool("solana.contract_recharge") {
+		solanaRecharge()
+	}
 }
 
 // bscRecharge 币安链任务归集
@@ -768,6 +771,123 @@ func wemixRecharge() {
 
 			if hashResult != nil {
 				g.Model("recharge").Where("id", value.Id).Data(g.Map{"status": 2, "nonce": nonce, "imputation_hash": hashResult}).Update()
+			}
+		}
+	}
+}
+
+// solanaRecharge Solana链任务归集
+func solanaRecharge() {
+	g.Log().File("merge_recharge.{Y-m-d}.log").Println("开始Solana归集")
+
+	solanaMergeAddress, _ := service.SysConfig.GetConfigByKey("sys.solanaMergeAddress")
+	solanaFeeAddress, _ := service.SysConfig.GetConfigByKey("sys.solanaFeeAddress")
+	solanaFeeAddressPrivateKey, _ := service.SysConfig.GetConfigByKey("sys.solanaFeeAddressPrivateKey")
+
+	if solanaMergeAddress == nil || solanaMergeAddress.ConfigValue == "" ||
+		solanaFeeAddress == nil || solanaFeeAddress.ConfigValue == "" ||
+		solanaFeeAddressPrivateKey == nil || solanaFeeAddressPrivateKey.ConfigValue == "" {
+		g.Log().File("merge_recharge.{Y-m-d}.log").Println("Solana归集地址或手续费私钥未配置，退出归集")
+		return
+	}
+
+	solanaFeePrivateKey, _ := library.DecryptByAes(solanaFeeAddressPrivateKey.ConfigValue)
+
+	// Solana单笔交易手续费约 5000 lamports (0.000005 SOL)
+	// 为SPL Token转账预留更多（可能需要创建ATA: ~0.002 SOL）
+	// 设定最小手续费为 0.003 SOL = 3_000_000 lamports
+	minFeeLamports := int64(3_000_000)
+
+	var list []*model.Recharge
+	err := g.Model("recharge").Where("main_chain", "solana").Where("status", 1).Limit(20).Scan(&list)
+	if err != nil {
+		g.Log().File("merge_recharge.{Y-m-d}.log").Printf("Solana查询未归集任务失败: %v", err)
+		return
+	}
+	g.Log().File("merge_recharge.{Y-m-d}.log").Printf("Solana待归集记录: %d 条", len(list))
+
+	for _, value := range list {
+		// 查询用户地址SOL余额
+		balanceLamports, err := rpc.SolanaClient.GetBalance(value.ToAddress)
+		if err != nil {
+			g.Log().File("merge_recharge.{Y-m-d}.log").Printf("Solana查询余额失败 addr=%v err=%v", value.ToAddress, err)
+			continue
+		}
+		balance := int64(balanceLamports)
+
+		var needFee int64
+		if value.ContractAddress == rpc.SOLNativeMint {
+			// SOL原生转账：需要手续费 + 转出金额
+			amount, _ := decimal.NewFromString(value.Amount)
+			amountLamports := amount.Mul(decimal.NewFromInt(rpc.LamportsPerSOL)).IntPart()
+			if balance-minFeeLamports-amountLamports < 0 {
+				needFee = minFeeLamports + amountLamports - balance
+			}
+		} else {
+			// SPL Token转账：只需要SOL手续费
+			if balance-minFeeLamports < 0 {
+				needFee = minFeeLamports - balance
+			}
+		}
+
+		if needFee > 0 {
+			// 需要先转手续费
+			if count, _ := g.Model("fee_list").Where("main_chain", "solana").Where("address", value.ToAddress).Where("status", 1).Count(); count == 0 {
+				feeAmountSOL := decimal.NewFromInt(needFee).Div(decimal.NewFromInt(rpc.LamportsPerSOL))
+				txSig, err := rpc.SolanaTransferSOL(string(solanaFeePrivateKey), value.ToAddress, feeAmountSOL)
+				if err != nil {
+					g.Log().File("merge_recharge.{Y-m-d}.log").Printf("Solana手续费转账失败 addr=%v err=%v", value.ToAddress, err)
+					continue
+				}
+				if txSig != "" {
+					feeAmount, _ := feeAmountSOL.Float64()
+					g.Model("fee_list").Data(g.Map{
+						"main_chain":       "solana",
+						"coin_name":        "SOL",
+						"withdraw_address": solanaFeeAddress.ConfigValue,
+						"address":          value.ToAddress,
+						"amount":           feeAmount,
+						"hash":             txSig,
+						"recharge_id":      value.Id,
+					}).Insert()
+					g.Model("recharge").Where("id", value.Id).Data(g.Map{"status": 5}).Update()
+					g.Log().File("merge_recharge.{Y-m-d}.log").Printf("Solana手续费已转出 addr=%v sig=%v amount=%v", value.ToAddress, txSig, feeAmount)
+				}
+			}
+		} else {
+			// 余额足够，直接归集
+			var (
+				address  *model.Address
+				currency *model.Currency
+			)
+			g.Model("currency").Where("main_chain", "solana").Where("contract_address", value.ContractAddress).FindScan(&currency)
+			if currency == nil {
+				continue
+			}
+			g.Model("address").Where("main_chain", "solana").Where("address", value.ToAddress).FindScan(&address)
+			if address == nil {
+				continue
+			}
+			privateKey, _ := library.DecryptByAes(address.PrivateKey)
+
+			var txSig string
+			if value.ContractAddress == rpc.SOLNativeMint {
+				// SOL归集：转出充值金额（扣除预留租金）
+				amount, _ := decimal.NewFromString(value.Amount)
+				txSig, err = rpc.SolanaTransferSOL(string(privateKey), solanaMergeAddress.ConfigValue, amount)
+			} else {
+				// SPL Token归集
+				amount, _ := decimal.NewFromString(value.Amount)
+				txSig, err = rpc.SolanaTransferSPLToken(string(privateKey), solanaMergeAddress.ConfigValue, value.ContractAddress, amount, currency.Decimals)
+			}
+
+			if err != nil {
+				g.Log().File("merge_recharge.{Y-m-d}.log").Printf("Solana归集失败 id=%v err=%v", value.Id, err)
+				continue
+			}
+			if txSig != "" {
+				g.Model("recharge").Where("id", value.Id).Data(g.Map{"status": 2, "imputation_hash": txSig}).Update()
+				g.Log().File("merge_recharge.{Y-m-d}.log").Printf("Solana归集成功 id=%v sig=%v", value.Id, txSig)
 			}
 		}
 	}

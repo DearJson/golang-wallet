@@ -111,9 +111,9 @@
 [bsc]
     contract_recharge = false   ##是否开启合约充值
     contract_address = ""  ##合约充值地址(注意小写)
-    address_recharge = true ##是否开启获取地址充值
+    address_recharge = false ##是否开启获取地址充值
     chain_id = 56
-    common_recharge = "0xE1C0d3D4690Bf7BD64F97193C64b3C6Ec5BbBB87"
+    common_recharge = ""
 ##配置tron链
 [tron]
     contract_recharge = false ##是否开启合约充值
@@ -140,3 +140,14 @@
     contract_address = ""   ##合约充值地址(注意小写)
     address_recharge = false ##是否开启获取地址充值
     chain_id = 1
+##配置Solana链
+[solana]
+    address_recharge = false ##是否开启获取地址充值
+    contract_recharge = true ##是否开启合约充值(Program监听)
+    contract_address = "B2dWxxKM6BFok7yeWVu8TGDDarWS6eUkz3zRZPBAHDJc"   ##充值合约Program ID
+##Helius Webhook配置
+[helius]
+    api_key = "52ddeebe-0586-4b99-b9a2-ed44722770b5" ##Helius API Key
+    webhook_id = "" ##Webhook ID，首次启动后自动生成
+    webhook_secret = "" ##Webhook Secret，用于验证回调签名
+    webhook_url = "https://wallet-api.pythiacoin.co/webhook/solana" ##Webhook回调地址，如 https://yourdomain.com/webhook/solana

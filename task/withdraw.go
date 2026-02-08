@@ -6,12 +6,13 @@ import (
 	"gfast/app/system/model"
 	"gfast/library"
 	"gfast/rpc"
+	"math"
+	"math/big"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/gogf/gf/frame/g"
 	"github.com/gogf/gf/util/gconv"
 	"github.com/shopspring/decimal"
-	"math"
-	"math/big"
 )
 
 // 出金任务
@@ -33,6 +34,9 @@ func withdrawTask() {
 	}
 	if g.Cfg().GetBool("nac.address_recharge") {
 		nacWithdraw()
+	}
+	if g.Config().GetBool("solana.address_recharge") || g.Config().GetBool("solana.contract_recharge") {
+		solanaWithdraw()
 	}
 }
 
@@ -349,6 +353,64 @@ func nacWithdraw() {
 
 		if hashResult != "" {
 			g.Model("withdraw").Data(g.Map{"withdraw_address": nacWithdrawAddress.ConfigValue, "hash": hashResult, "status": 3}).Where("id", value.Id).Update()
+		}
+	}
+}
+
+func solanaWithdraw() {
+	g.Log().File("withdraw.{Y-m-d}.log").Printf("开始处理Solana出金任务")
+	solanaWithdrawPrivateKeyConfig, _ := service.SysConfig.GetConfigByKey("sys.solanaWithdrawAddressPrivateKey")
+	solanaWithdrawAddressConfig, _ := service.SysConfig.GetConfigByKey("sys.solanaWithdrawAddress")
+	if solanaWithdrawPrivateKeyConfig == nil || solanaWithdrawPrivateKeyConfig.ConfigValue == "" ||
+		solanaWithdrawAddressConfig == nil || solanaWithdrawAddressConfig.ConfigValue == "" {
+		g.Log().File("withdraw.{Y-m-d}.log").Printf("Solana未配置出金地址或私钥")
+		return
+	}
+
+	ids, err := g.Model("withdraw").Where("main_chain", "solana").Where("status", 2).Limit(20).Array("id")
+	if err != nil {
+		return
+	}
+	if len(ids) == 0 {
+		g.Log().File("withdraw.{Y-m-d}.log").Printf("Solana未找到需要出金的记录")
+		return
+	}
+
+	solanaPrivateKey, _ := library.DecryptByAes(solanaWithdrawPrivateKeyConfig.ConfigValue)
+	solanaAddress := solanaWithdrawAddressConfig.ConfigValue
+
+	for _, id := range ids {
+		var value *model.Withdraw
+		var currency *model.Currency
+		g.Model("withdraw").Where("id", id).Where("status", 2).FindScan(&value)
+		if value == nil {
+			continue
+		}
+		g.Model("currency").Where("main_chain", "solana").Where("contract_address", value.ContractAddress).FindScan(&currency)
+		if currency == nil {
+			continue
+		}
+
+		hashKey := library.Md5Data(value.Address, value.ContractAddress, value.Amount, value.Status, value.Nonce1)
+		if hashKey != value.HashKey {
+			g.Model("withdraw").Data(g.Map{"status": 0}).Where("id", value.Id).Update()
+			continue
+		}
+
+		var txSig string
+		if value.ContractAddress == rpc.SOLNativeMint {
+			// SOL原生转账
+			txSig, err = rpc.SolanaTransferSOL(string(solanaPrivateKey), value.Address, decimal.NewFromFloat(value.Amount))
+		} else {
+			// SPL Token转账
+			txSig, err = rpc.SolanaTransferSPLToken(string(solanaPrivateKey), value.Address, value.ContractAddress, decimal.NewFromFloat(value.Amount), currency.Decimals)
+		}
+
+		if err == nil && txSig != "" {
+			hashKey = library.Md5Data(value.Address, value.ContractAddress, value.Amount, 3, value.Nonce1)
+			g.Model("withdraw").Data(g.Map{"withdraw_address": solanaAddress, "hashKey": hashKey, "hash": txSig, "status": 3}).Where("id", value.Id).Update()
+		} else {
+			g.Log().File("withdraw.{Y-m-d}.log").Printf("Solana提现失败 id=%v err=%v", id, err)
 		}
 	}
 }

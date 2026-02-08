@@ -101,6 +101,7 @@ func (s *address) Add(ctx context.Context, req *dao.AddressAddReq) (err error) {
 	cache.Remove(global.NacUserAddressList)
 	cache.Remove(global.WemixUserAddressList)
 	cache.Remove(global.EthUserAddressList)
+	cache.Remove(global.SolanaUserAddressList)
 	return
 }
 
@@ -115,6 +116,7 @@ func (s *address) Edit(ctx context.Context, req *dao.AddressEditReq) error {
 	cache.Remove(global.NacUserAddressList)
 	cache.Remove(global.WemixUserAddressList)
 	cache.Remove(global.EthUserAddressList)
+	cache.Remove(global.SolanaUserAddressList)
 	return err
 }
 
@@ -136,6 +138,7 @@ func (s *address) DeleteByIds(ctx context.Context, ids []int) (err error) {
 	cache.Remove(global.NacUserAddressList)
 	cache.Remove(global.WemixUserAddressList)
 	cache.Remove(global.EthUserAddressList)
+	cache.Remove(global.SolanaUserAddressList)
 	return
 }
 
@@ -216,6 +219,24 @@ func (s *address) GetWemixAllAddress(ctx context.Context) (list []string, err er
 
 	result := cache.GetOrSetFuncLock(global.WemixUserAddressList, func() (interface{}, error) {
 		stsd, err := dao.Address.Ctx(ctx).Where(dao.Address.Columns.MainChain, "wemix").FindArray(dao.Address.Columns.Address)
+		if err != nil {
+			g.Log().Error(err)
+			return nil, err
+		}
+		return gconv.SliceStr(stsd), nil
+	}, 0, nil)
+
+	if result != nil {
+		err = gconv.Struct(result, &list)
+	}
+	return
+}
+
+func (s *address) GetSolanaAllAddress(ctx context.Context) (list []string, err error) {
+	cache := service.Cache.New()
+
+	result := cache.GetOrSetFuncLock(global.SolanaUserAddressList, func() (interface{}, error) {
+		stsd, err := dao.Address.Ctx(ctx).Where(dao.Address.Columns.MainChain, "solana").FindArray(dao.Address.Columns.Address)
 		if err != nil {
 			g.Log().Error(err)
 			return nil, err
