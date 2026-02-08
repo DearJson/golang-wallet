@@ -233,6 +233,40 @@ func (c *HeliusClient) RemoveAddressesFromWebhook(webhookID string, removeAddres
 	return err
 }
 
+// ParseTransactions 通过Helius Enhanced API解析交易（返回与Webhook回调相同格式的增强数据）
+// signatures: 交易签名列表（最多100个）
+func (c *HeliusClient) ParseTransactions(signatures []string) ([]HeliusEnhancedTransaction, error) {
+	url := fmt.Sprintf("%s/v0/transactions?api-key=%s", HeliusBaseURL, c.ApiKey)
+
+	jsonData, err := json.Marshal(map[string]interface{}{
+		"transactions": signatures,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal request error: %v", err)
+	}
+
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("parse transactions request error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response error: %v", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("parse transactions failed [%d]: %s", resp.StatusCode, string(body))
+	}
+
+	var result []HeliusEnhancedTransaction
+	if err = json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("unmarshal response error: %v", err)
+	}
+	return result, nil
+}
+
 // EnsureWebhookExists 确保Webhook存在，不存在则创建
 // webhookURL: 回调地址 (如 https://your-domain.com/webhook/solana)
 // addresses: 需要监听的地址列表

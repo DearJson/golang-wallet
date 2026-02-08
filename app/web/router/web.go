@@ -128,6 +128,8 @@ func init() {
 			group.POST("/balanceOf", api.Solana.BalanceOf)
 			//写入要监控的地址
 			group.POST("/setAddress", api.Solana.SetAddress)
+			//按照现有要求执行一下某个hash
+			group.POST("/resetHash", api.Solana.ResetHash)
 		})
 
 	})

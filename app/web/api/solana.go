@@ -428,3 +428,104 @@ func registerAddressToHelius(address string) {
 	}
 	g.Log().File("solana-webhook.{Y-m-d}.log").Printf("成功注册地址到Helius: %v", address)
 }
+
+// ResetHash 通过交易hash手动导入充值记录
+// 使用Helius Parse Transaction API获取增强交易数据，复用与Webhook相同的验证逻辑
+func (s *solana) ResetHash(r *ghttp.Request) {
+	hash := gconv.String(r.GetPost("hash"))
+	if hash == "" {
+		s.FailJsonExit(r, "交易hash不能为空")
+	}
+
+	// 检查交易是否已存在
+	ctx := gctx.New()
+	exists, _ := service.Recharge.GetInfoByHash(ctx, hash)
+	if exists != nil {
+		s.FailJsonExit(r, "该交易已存在充值记录")
+	}
+
+	// 通过Helius API解析交易，获取与Webhook回调相同格式的增强交易数据
+	heliusClient := rpc.NewHeliusClient()
+	if heliusClient.ApiKey == "" {
+		s.FailJsonExit(r, "Helius API未配置")
+	}
+
+	txList, err := heliusClient.ParseTransactions([]string{hash})
+	if err != nil {
+		g.Log().File("solana-reset.{Y-m-d}.log").Printf("解析交易失败: %v, hash: %v", err, hash)
+		s.FailJsonExit(r, "解析交易失败: "+err.Error())
+	}
+	if len(txList) == 0 {
+		s.FailJsonExit(r, "未找到该交易或交易尚未确认")
+	}
+
+	// 先通过RPC确认交易状态（必须是成功的交易）
+	sigStatus, err := rpc.SolanaClient.GetSignatureStatus(hash)
+	if err != nil {
+		s.FailJsonExit(r, "查询交易状态失败: "+err.Error())
+	}
+	if sigStatus == nil {
+		s.FailJsonExit(r, "交易不存在或尚未确认")
+	}
+	if sigStatus.Err != nil {
+		s.FailJsonExit(r, "该交易执行失败，无法导入")
+	}
+
+	// 加载配置和地址信息（与WebhookReceiver完全相同的逻辑）
+	userAddresses, _ := service.Address.GetSolanaAllAddress(ctx)
+	coinAddressMap, _ := service.Currency.GetSolanaCoinAddress(ctx)
+	contractAddress := g.Config().GetString("solana.contract_address")
+	addressRecharge := g.Config().GetBool("solana.address_recharge")
+	contractRecharge := g.Config().GetBool("solana.contract_recharge")
+
+	userAddrMap := make(map[string]bool)
+	for _, addr := range userAddresses {
+		userAddrMap[addr] = true
+	}
+	coinMintSet := make(map[string]bool)
+	for mint := range coinAddressMap {
+		coinMintSet[mint] = true
+	}
+	excludeFromAddrs := make(map[string]bool)
+	if feeAddr, _ := cservice.SysConfig.GetConfigByKey("sys.solanaFeeAddress"); feeAddr != nil && feeAddr.ConfigValue != "" {
+		excludeFromAddrs[feeAddr.ConfigValue] = true
+	}
+	if withdrawAddr, _ := cservice.SysConfig.GetConfigByKey("sys.solanaWithdrawAddress"); withdrawAddr != nil && withdrawAddr.ConfigValue != "" {
+		excludeFromAddrs[withdrawAddr.ConfigValue] = true
+	}
+	if mergeAddr, _ := cservice.SysConfig.GetConfigByKey("sys.solanaMergeAddress"); mergeAddr != nil && mergeAddr.ConfigValue != "" {
+		excludeFromAddrs[mergeAddr.ConfigValue] = true
+	}
+
+	queueExchange := &amqp.QueueExchange{
+		QuName: _const.SolanaSweepQuName,
+		RtKey:  _const.SolanaSweepRtKey,
+		ExName: _const.SolanaSweepExName,
+		ExType: _const.SolanaSweepExType,
+	}
+	mq := amqp.New(queueExchange)
+	hasMessage := false
+
+	for _, tx := range txList {
+		// 合约充值
+		if contractRecharge && contractAddress != "" {
+			if processContractDeposit(mq, &tx, contractAddress, coinMintSet) {
+				hasMessage = true
+			}
+		}
+		// 地址充值
+		if addressRecharge {
+			if processHeliusTransaction(mq, &tx, userAddrMap, coinMintSet, excludeFromAddrs, false) {
+				hasMessage = true
+			}
+		}
+	}
+
+	if !hasMessage {
+		s.FailJsonExit(r, "该交易不满足充值条件（非合约Deposit指令/非监控地址/币种不匹配）")
+	}
+
+	mq.Start()
+	g.Log().File("solana-reset.{Y-m-d}.log").Printf("手动导入交易成功: %v", hash)
+	s.SusJsonExit(r)
+}
