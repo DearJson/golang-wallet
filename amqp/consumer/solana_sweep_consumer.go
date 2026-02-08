@@ -74,7 +74,12 @@ func (s *SolanaSweepConsumer) Consumer(dataByte []byte, key uint64) error {
 		// 金额已经在Helius回调中计算好了（带精度）
 		amount = solTx.Amount
 		rechargeType = 1
-		status = 1
+		// 合约充值资金已直接进入合约账户，无需归集，状态直接设为3（归集成功/已完成）
+		if solTx.TransactionType == "CONTRACT_DEPOSIT" {
+			status = 3
+		} else {
+			status = 1
+		}
 	} else {
 		// SOL原生转账
 		coinAddress, err := sservice.Currency.GetSolanaCoinAddress(ctx)
