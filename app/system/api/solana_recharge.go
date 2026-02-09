@@ -71,18 +71,22 @@ func (c *solanaRecharge) Callback(r *ghttp.Request) {
 	for _, value := range list {
 		cleanRemarks := strings.ReplaceAll(value.Remarks, "\x00", "")
 		data := url.Values{
-			"main_chain":       {value.MainChain},
-			"block_hash":       {value.BlockHash},
-			"recharge_type":    {gconv.String(value.RechargeType)},
-			"from_address":     {value.FromAddress},
-			"to_address":       {value.ToAddress},
-			"coin_token":       {value.CoinToken},
-			"contract_address": {value.ContractAddress},
-			"amount":           {gconv.String(value.Amount)},
-			"hash":             {value.Hash},
-			"imputation_hash":  {value.ImputationHash},
-			"remarks":          {cleanRemarks},
-			"status":           {gconv.String(value.Status)},
+			"main_chain":        {value.MainChain},
+			"block_hash":        {value.BlockHash},
+			"recharge_type":     {gconv.String(value.RechargeType)},
+			"from_address":      {value.FromAddress},
+			"to_address":        {value.ToAddress},
+			"coin_token":        {value.CoinToken},
+			"coin_token1":       {value.CoinToken1},
+			"contract_address":  {value.ContractAddress},
+			"contract_address1": {value.ContractAddress1},
+			"amount":            {gconv.String(value.Amount)},
+			"amount1":           {gconv.String(value.Amount1)},
+			"hash":              {value.Hash},
+			"imputation_hash":   {value.ImputationHash},
+			"remarks":           {cleanRemarks},
+			"status":            {gconv.String(value.Status)},
+			"token_id":          {value.TokenId},
 		}
 		resp, _ := g.Client().PostForm(callbackUrl.ConfigValue, data)
 		if resp != nil {

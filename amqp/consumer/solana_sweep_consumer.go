@@ -140,18 +140,22 @@ func solanaSendNotify(recharge *dao.RechargeAddReq) {
 		return
 	}
 	data := url.Values{
-		"main_chain":       {recharge.MainChain},
-		"block_hash":       {recharge.BlockHash},
-		"recharge_type":    {gconv.String(recharge.RechargeType)},
-		"from_address":     {recharge.FromAddress},
-		"to_address":       {recharge.ToAddress},
-		"coin_token":       {recharge.CoinToken},
-		"contract_address": {recharge.ContractAddress},
-		"amount":           {recharge.Amount},
-		"hash":             {recharge.Hash},
-		"imputation_hash":  {""},
-		"remarks":          {recharge.Remarks},
-		"status":           {gconv.String(recharge.Status)},
+		"main_chain":        {recharge.MainChain},
+		"block_hash":        {recharge.BlockHash},
+		"recharge_type":     {gconv.String(recharge.RechargeType)},
+		"from_address":      {recharge.FromAddress},
+		"to_address":        {recharge.ToAddress},
+		"coin_token":        {recharge.CoinToken},
+		"coin_token1":       {recharge.CoinToken1},
+		"contract_address":  {recharge.ContractAddress},
+		"contract_address1": {recharge.ContractAddress1},
+		"amount":            {recharge.Amount},
+		"amount1":           {gconv.String(recharge.Amount1)},
+		"hash":              {recharge.Hash},
+		"imputation_hash":   {""},
+		"remarks":           {recharge.Remarks},
+		"status":            {gconv.String(recharge.Status)},
+		"token_id":          {recharge.TokenId},
 	}
 	resp, err := g.Client().PostForm(callbackUrl.ConfigValue, data)
 	if err != nil {
