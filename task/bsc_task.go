@@ -102,3 +102,62 @@ func bscSweepTask() {
 		mq.Start()
 	}
 }
+
+// BscSweepTaskByCoinAddress 通过查询1-10区块内所有coinAddress相关的交易
+func BscSweepTaskByCoinAddress(coinAddress string) {
+	if coinAddress == "" {
+		g.Log().Println("coinAddress参数不能为空")
+		return
+	}
+
+	var (
+		bscClient       = rpc.BscClient{}
+		fromBlock int64 = 1
+		toBlock   int64 = 10
+	)
+
+	g.Log().Printf("开始扫描块%d到%d的coinAddress %s相关交易", fromBlock, toBlock, coinAddress)
+
+	// 通过RPC日志获取所有相关交易
+	logs, err := bscClient.Init().GetLogsByCoinAddress(fromBlock, toBlock, coinAddress)
+	if err != nil {
+		g.Log().Printf("获取coinAddress日志失败: %v", err)
+		return
+	}
+
+	g.Log().Printf("找到%d条相关日志", len(logs))
+
+	// 创建队列交换器
+	queueExchange := &amqp.QueueExchange{
+		QuName: _const.BscSweepQuName,
+		RtKey:  _const.BscSweepRtKey,
+		ExName: _const.BscSweepExName,
+		ExType: _const.BscSweepExType,
+	}
+	mq := amqp.New(queueExchange)
+
+	// 处理每个日志对应的交易
+	for _, logEntry := range logs {
+		if logData, ok := logEntry.(map[string]interface{}); ok {
+			if txHash, exists := logData["transactionHash"]; exists {
+				if txHashStr, ok := txHash.(string); ok {
+					// 根据交易哈希获取完整交易信息
+					txData, err := bscClient.Init().GetTransactionByHash(txHashStr)
+					if err != nil {
+						g.Log().Printf("获取交易详情失败 %s: %v", txHashStr, err)
+						continue
+					}
+
+					// 将交易发送到队列
+					jsonByte, _ := json.Marshal(txData)
+					t := &(producer.BscProducer{Msg: string(jsonByte)})
+					mq.RegisterProducer(t)
+					g.Log().File("Bsc-producer.{Y-m-d}.log").Printf("生产coinAddress相关交易 %s", txHashStr)
+				}
+			}
+		}
+	}
+
+	mq.Start()
+	g.Log().Printf("coinAddress %s相关交易扫描完成", coinAddress)
+}

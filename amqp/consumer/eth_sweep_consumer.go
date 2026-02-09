@@ -283,6 +283,40 @@ func contractRechargeEthHandle(transfer *rpc.EthTransactions) (err error) {
 		coinToken = "卡牌合成"
 		rechargeType = 1
 		remarks = functionInput.Remarks
+	} else if functionName == "0x1afce229" {
+		contractAbi, err := abi.JSON(strings.NewReader(`[{"anonymous":false,"inputs":[{"indexed":false,"internalType":"address[]","name":"tokenAddress","type":"address[]"},{"indexed":false,"internalType":"uint256[]","name":"amount","type":"uint256[]"},{"indexed":false,"internalType":"string","name":"remark","type":"string"},{"indexed":false,"internalType":"address[]","name":"customerAddress","type":"address[]"}],"name":"TransactionDetails","type":"event"}]`))
+		if err != nil {
+			return err
+		}
+		var event struct {
+			TokenAddress    []common.Address
+			Amount          []*big.Int
+			Remark          string
+			CustomerAddress []common.Address
+		}
+		for _, vlog := range ethStruct.Logs {
+			if len(vlog.Topics) > 0 && vlog.Topics[0] == contractAbi.Events["TransactionDetails"].ID.String() {
+				decodedSig, err := hex.DecodeString(vlog.Data[2:])
+				if err != nil {
+					return err
+				}
+				err = contractAbi.UnpackIntoInterface(&event, "TransactionDetails", decodedSig)
+				if err != nil {
+					return err
+				}
+
+				contractAddress = strings.ToLower(event.TokenAddress[0].String())
+				coinToken = coinAddress[contractAddress].Name
+				amount = decimal.NewFromBigInt(event.Amount[0], 0).DivRound(decimal.NewFromFloat(math.Pow(10, float64(coinAddress[contractAddress].Decimals))), 18).String()
+				if len(event.TokenAddress) >= 2 {
+					contractAddress1 = strings.ToLower(event.TokenAddress[1].String())
+					coinToken1 = coinAddress[contractAddress1].Name
+					amount1 = decimal.NewFromBigInt(event.Amount[1], 0).DivRound(decimal.NewFromFloat(math.Pow(10, float64(coinAddress[contractAddress1].Decimals))), 18).String()
+				}
+				remarks = event.Remark
+				rechargeType = 1
+			}
+		}
 	} else {
 		return nil
 	}

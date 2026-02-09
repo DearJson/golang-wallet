@@ -20,13 +20,13 @@ func main() {
 
 	//fmt.Printf("%s", amount)
 	//
-	//a, _ := library.DecryptByAes("cw9pO3X0LaKR3q7QGox3+hYWNqyrxjUmAKdrWzTgJzFzG/qofq5Xj29bjnUKTPZPAfem8vmaIAis0x0pnmYLj8CtqvykvIOuNey/Bwljw7pK7gmv/K1xuM8ivopUt1g9")
+	//a, _ := library.DecryptByAes("9c13668e4475788246bb82fb363ff84f715b48e6685150c676070a93d51ee93ed6cda2fd49d1e91fbddf0e57964954de48e8adf2c18e4800ce273b9159d240eb2a1b67c85269146f55a8bfd283180e0c812a6af84bf89b6636e14e3b")
 	//
 	//fmt.Printf("%s\n", a)
 
 	fmt.Printf("%s\n", library.NewGoogleAuth().GetSecret())
-	//a, b, err := generateAddress()
-	//fmt.Printf("地址： %v \n 私钥： %v \n 错误信息: %v", a, b, err)
+	a, b, err := generateAddress()
+	fmt.Printf("地址： %v \n 私钥： %v \n 错误信息: %v", a, b, err)
 }
 
 func generateAddress() (string, string, error) {

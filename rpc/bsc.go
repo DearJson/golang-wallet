@@ -131,8 +131,9 @@ func TransferBnb(privateKeys string, amount *big.Int, toAddress string, MaxNonce
 	gasLimitConfig, _ := service.SysConfig.GetConfigByKey("sys.bnbGasLimit")
 	gasLimit := gconv.Uint64(gasLimitConfig.ConfigValue) // in units
 	gasPriceConfig, _ := service.SysConfig.GetConfigByKey("sys.bnbGasPrice")
-	gasPrice := new(big.Int)
-	gasPrice = big.NewInt(gconv.Int64(gasPriceConfig.ConfigValue) * gconv.Int64(math.Pow(10, 9)))
+	// 支持小数 gasPrice (Gwei 转 Wei)
+	gasPriceFloat := gconv.Float64(gasPriceConfig.ConfigValue) * 1e9
+	gasPrice := big.NewInt(int64(gasPriceFloat))
 
 	toAddresss := common.HexToAddress(toAddress)
 	tx := types.NewTransaction(nonce, toAddresss, amount, gasLimit, gasPrice, nil)
@@ -188,8 +189,9 @@ func TransferToken(privateKeys string, amount *big.Int, toAddress string, tokenA
 	gasLimitConfig, _ := service.SysConfig.GetConfigByKey("sys.bnbGasLimit")
 	gasLimit := gconv.Uint64(gasLimitConfig.ConfigValue) // in units
 	gasPriceConfig, _ := service.SysConfig.GetConfigByKey("sys.bnbGasPrice")
-	gasPrice := new(big.Int)
-	gasPrice = big.NewInt(gconv.Int64(gasPriceConfig.ConfigValue) * gconv.Int64(math.Pow(10, 9)))
+	// 支持小数 gasPrice (Gwei 转 Wei)
+	gasPriceFloat := gconv.Float64(gasPriceConfig.ConfigValue) * 1e9
+	gasPrice := big.NewInt(int64(gasPriceFloat))
 
 	toAddresss := common.HexToAddress(toAddress)
 	tokenAddresss := common.HexToAddress(tokenAddress)
@@ -261,8 +263,9 @@ func SpecifyTransferToken(
 	gasLimitConfig, _ := service.SysConfig.GetConfigByKey("sys.bnbGasLimit")
 	gasLimit := gconv.Uint64(gasLimitConfig.ConfigValue) // in units
 	gasPriceConfig, _ := service.SysConfig.GetConfigByKey("sys.bnbGasPrice")
-	gasPrice := new(big.Int)
-	gasPrice = big.NewInt(gconv.Int64(gasPriceConfig.ConfigValue) * gconv.Int64(math.Pow(10, 9)))
+	// 支持小数 gasPrice (Gwei 转 Wei)
+	gasPriceFloat := gconv.Float64(gasPriceConfig.ConfigValue) * 1e9
+	gasPrice := big.NewInt(int64(gasPriceFloat))
 
 	// 合约地址和参数
 	contractAddress := common.HexToAddress(functionContractAddress)
@@ -399,8 +402,9 @@ func TransferTokenOr(privateKeys string, amount *big.Int, toAddress string, toke
 	gasLimitConfig, _ := service.SysConfig.GetConfigByKey("sys.bnbGasLimit")
 	gasLimit := gconv.Uint64(gasLimitConfig.ConfigValue) // in units
 	gasPriceConfig, _ := service.SysConfig.GetConfigByKey("sys.bnbGasPrice")
-	gasPrice := new(big.Int)
-	gasPrice = big.NewInt(gconv.Int64(gasPriceConfig.ConfigValue) * gconv.Int64(math.Pow(10, 9)))
+	// 支持小数 gasPrice (Gwei 转 Wei)
+	gasPriceFloat := gconv.Float64(gasPriceConfig.ConfigValue) * 1e9
+	gasPrice := big.NewInt(int64(gasPriceFloat))
 
 	transactOpts := &bind.TransactOpts{
 		From:     fromAddress,
@@ -470,8 +474,9 @@ func SwapToken(privateKeys string, amount *big.Int, toAddress string, SwapRoute 
 	gasLimitConfig, _ := service.SysConfig.GetConfigByKey("sys.bnbGasLimit")
 	gasLimit := gconv.Uint64(gasLimitConfig.ConfigValue) // in units
 	gasPriceConfig, _ := service.SysConfig.GetConfigByKey("sys.bnbGasPrice")
-	gasPrice := new(big.Int)
-	gasPrice = big.NewInt(gconv.Int64(gasPriceConfig.ConfigValue) * gconv.Int64(math.Pow(10, 9)))
+	// 支持小数 gasPrice (Gwei 转 Wei)
+	gasPriceFloat := gconv.Float64(gasPriceConfig.ConfigValue) * 1e9
+	gasPrice := big.NewInt(int64(gasPriceFloat))
 
 	transactOpts := &bind.TransactOpts{
 		From:     fromAddress,
@@ -534,8 +539,9 @@ func SafeTransferFrom(privateKeys string, toAddress string, tokenAddress string,
 	gasLimitConfig, _ := service.SysConfig.GetConfigByKey("sys.bnbGasLimit")
 	gasLimit := gconv.Uint64(gasLimitConfig.ConfigValue) // in units
 	gasPriceConfig, _ := service.SysConfig.GetConfigByKey("sys.bnbGasPrice")
-	gasPrice := new(big.Int)
-	gasPrice = big.NewInt(gconv.Int64(gasPriceConfig.ConfigValue) * gconv.Int64(math.Pow(10, 9)))
+	// 支持小数 gasPrice (Gwei 转 Wei)
+	gasPriceFloat := gconv.Float64(gasPriceConfig.ConfigValue) * 1e9
+	gasPrice := big.NewInt(int64(gasPriceFloat))
 
 	//检查一下，最新的nonce是否大于数据库的最后一条nonce+1,如果是，取这个获取的
 	if MaxNonce > 0 {
@@ -875,6 +881,26 @@ func (b *BscClient) GetTransferLogsBatch(fromBlock, toBlock int64, addresses []s
 	// 如果指定了地址，则只查询这些合约地址的Transfer事件
 	if len(addresses) > 0 {
 		filter["address"] = addresses
+	}
+
+	err = b.client.Call(&logs, "eth_getLogs", filter)
+	if err != nil {
+		return nil, err
+	}
+
+	return logs, nil
+}
+
+// GetLogsByCoinAddress 查询指定区块范围内特定coinAddress相关的所有交易日志
+func (b *BscClient) GetLogsByCoinAddress(fromBlock, toBlock int64, coinAddress string) (logs []interface{}, err error) {
+	fromBlockHex := "0x" + strconv.FormatInt(fromBlock, 16)
+	toBlockHex := "0x" + strconv.FormatInt(toBlock, 16)
+
+	// 构建过滤器 - 查询所有与指定地址相关的日志
+	filter := map[string]interface{}{
+		"fromBlock": fromBlockHex,
+		"toBlock":   toBlockHex,
+		"address":   coinAddress, // 指定合约地址
 	}
 
 	err = b.client.Call(&logs, "eth_getLogs", filter)
