@@ -226,6 +226,13 @@ func initSolanaWebhook() {
 
 		// 确保Webhook存在并同步地址
 		configWebhookID := g.Config().GetString("helius.webhook_id")
+		
+		// 没有地址需要监控，跳过Webhook初始化
+		if len(addresses) == 0 {
+			g.Log().Println("暂无地址需要监控，跳过Webhook初始化")
+			return
+		}
+		
 		webhookID, err := client.EnsureWebhookExists(webhookURL, addresses)
 		if err != nil {
 			g.Log().Printf("初始化Solana Webhook失败: %v", err)

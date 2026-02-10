@@ -275,27 +275,32 @@ func (c *HeliusClient) EnsureWebhookExists(webhookURL string, addresses []string
 	webhookSecret := g.Config().GetString("helius.webhook_secret")
 
 	if webhookID != "" {
-		// 检查Webhook是否还存在
+		// webhook_id已配置，只做更新，不创建新的
 		_, err := c.GetWebhook(webhookID)
-		if err == nil {
-			// 更新地址列表
-			config := &HeliusWebhookConfig{
-				WebhookURL:       webhookURL,
-				TransactionTypes: []string{"ANY"},
-				AccountAddresses: addresses,
-				WebhookType:      "enhanced",
-				AuthHeader:       webhookSecret,
-				TxnStatus:        "success",
-			}
-			_, err = c.UpdateWebhook(webhookID, config)
-			if err != nil {
-				g.Log().Printf("更新Solana Webhook失败: %v", err)
-			}
-			return webhookID, nil
+		if err != nil {
+			return "", fmt.Errorf("获取已配置的Webhook失败(id=%s): %v，请检查webhook_id是否正确", webhookID, err)
 		}
+		// 更新地址列表
+		config := &HeliusWebhookConfig{
+			WebhookURL:       webhookURL,
+			TransactionTypes: []string{"ANY"},
+			AccountAddresses: addresses,
+			WebhookType:      "enhanced",
+			AuthHeader:       webhookSecret,
+			TxnStatus:        "success",
+		}
+		_, err = c.UpdateWebhook(webhookID, config)
+		if err != nil {
+			return "", fmt.Errorf("更新Solana Webhook失败: %v", err)
+		}
+		return webhookID, nil
 	}
 
-	// 创建新的Webhook
+	// webhook_id未配置，创建新的Webhook
+	if len(addresses) == 0 {
+		return "", fmt.Errorf("无法创建Webhook: 至少需要一个监控地址")
+	}
+
 	config := &HeliusWebhookConfig{
 		WebhookURL:       webhookURL,
 		TransactionTypes: []string{"ANY"},
