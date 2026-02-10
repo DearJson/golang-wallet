@@ -320,7 +320,7 @@ func processContractDeposit(mq *amqp.RabbitMQ, tx *rpc.HeliusEnhancedTransaction
 
 		solTx := rpc.SolanaTransaction{
 			Signature:       tx.Signature,
-			FromAddress:     userAddress,
+			FromAddress:     tx.FeePayer, // 合约充值记录签名者地址
 			ToAddress:       contractAddress,
 			Amount:          amountStr,
 			Mint:            mint,
