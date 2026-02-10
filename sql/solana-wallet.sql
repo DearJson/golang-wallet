@@ -7,19 +7,19 @@ VALUES ('solana', 'SOL', 'So11111111111111111111111111111111111111112', 9, 0);
 
 -- 添加系统配置（提现地址、手续费地址等，需手动配置实际值）
 INSERT INTO `sys_config` (`config_key`, `config_value`, `config_name`, `config_type`, `remark`)
-VALUES ('sys.solanaWithdrawAddress', '', 'Solana提现地址', 'Y', 'Solana出金钱包地址');
+VALUES ('sys.solanaWithdrawAddress', '', 'Solana提现地址',1, 'Solana出金钱包地址');
 
 INSERT INTO `sys_config` (`config_key`, `config_value`, `config_name`, `config_type`, `remark`)
-VALUES ('sys.solanaWithdrawAddressPrivateKey', '', 'Solana提现私钥', 'Y', 'Solana出金钱包私钥');
+VALUES ('sys.solanaWithdrawAddressPrivateKey', '', 'Solana提现私钥',1, 'Solana出金钱包私钥');
 
 INSERT INTO `sys_config` (`config_key`, `config_value`, `config_name`, `config_type`, `remark`)
-VALUES ('sys.solanaFeeAddress', '', 'Solana手续费地址', 'Y', 'Solana手续费代付钱包地址');
+VALUES ('sys.solanaFeeAddress', '', 'Solana手续费地址',1, 'Solana手续费代付钱包地址');
 
 INSERT INTO `sys_config` (`config_key`, `config_value`, `config_name`, `config_type`, `remark`)
-VALUES ('sys.solanaFeeAddressPrivateKey', '', 'Solana手续费私钥', 'Y', 'Solana手续费代付钱包私钥');
+VALUES ('sys.solanaFeeAddressPrivateKey', '', 'Solana手续费私钥',1, 'Solana手续费代付钱包私钥');
 
 INSERT INTO `sys_config` (`config_key`, `config_value`, `config_name`, `config_type`, `remark`)
-VALUES ('sys.solanaMergeAddress', '', 'Solana归集地址', 'Y', 'Solana归集目标钱包地址');
+VALUES ('sys.solanaMergeAddress', '', 'Solana归集地址',1, 'Solana归集目标钱包地址');
 
 -- ==================== 后台菜单 sys_auth_rule ====================
 -- ID从400开始，避免与现有链菜单冲突
