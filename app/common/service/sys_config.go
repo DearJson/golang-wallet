@@ -12,6 +12,8 @@ import (
 	"gfast/app/common/global"
 	"gfast/app/common/model"
 	"gfast/library"
+	"strings"
+
 	"github.com/gogf/gf/errors/gerror"
 	"github.com/gogf/gf/frame/g"
 	"github.com/gogf/gf/util/gconv"
@@ -61,6 +63,12 @@ func (s *sysConfig) SelectListByPage(req *model.SysConfigSearchReq) (total, page
 		err = gerror.New("获取数据失败")
 		return
 	}
+	// 私钥字段脱敏，不返回给前端
+	for _, item := range list {
+		if strings.Contains(item.ConfigKey, "PrivateKey") && item.ConfigValue != "" {
+			item.ConfigValue = "******"
+		}
+	}
 	return
 }
 
@@ -85,6 +93,10 @@ func (s *sysConfig) AddSave(req *model.SysConfigAddReq) (err error) {
 
 func (s *sysConfig) GetById(id int) (data *model.SysConfig, err error) {
 	err = dao.SysConfig.WherePri(id).Scan(&data)
+	// 私钥字段脱敏，不返回给前端
+	if data != nil && strings.Contains(data.ConfigKey, "PrivateKey") && data.ConfigValue != "" {
+		data.ConfigValue = "******"
+	}
 	return
 }
 
@@ -105,6 +117,12 @@ func (s *sysConfig) CheckConfigKeyUnique(configKey string, configId int64) error
 
 // EditSave 修改系统参数
 func (s *sysConfig) EditSave(req *model.SysConfigEditReq) (err error) {
+	// 私钥字段：如果前端传的是脱敏值"******"，说明未修改，跳过更新该字段
+	if strings.Contains(req.ConfigKey, "PrivateKey") && req.ConfigValue == "******" {
+		_, err = dao.SysConfig.FieldsEx(dao.SysConfig.C.ConfigId, dao.SysConfig.C.CreateBy, dao.SysConfig.C.ConfigValue).
+			WherePri(req.ConfigId).Data(req).Update()
+		return
+	}
 	if req.ConfigKey == "sys.bnbWithdrawAddressPrivateKey" || req.ConfigKey == "sys.bnbFeeAddressPrivateKey" ||
 		req.ConfigKey == "sys.tronWithdrawAddressPrivateKey" || req.ConfigKey == "sys.tronFeeAddressPrivateKey" ||
 		req.ConfigKey == "sys.hecoWithdrawAddressPrivateKey" || req.ConfigKey == "sys.hecoFeeAddressPrivateKey" ||
@@ -114,6 +132,10 @@ func (s *sysConfig) EditSave(req *model.SysConfigEditReq) (err error) {
 		if req.ConfigValue[0:2] == "0x" {
 			req.ConfigValue = req.ConfigValue[2:]
 		}
+		req.ConfigValue, _ = library.EncryptByAes(gconv.Bytes(req.ConfigValue))
+	}
+	// Solana私钥加密存储（Ed25519私钥为纯hex，无0x前缀）
+	if req.ConfigKey == "sys.solanaWithdrawAddressPrivateKey" || req.ConfigKey == "sys.solanaFeeAddressPrivateKey" {
 		req.ConfigValue, _ = library.EncryptByAes(gconv.Bytes(req.ConfigValue))
 	}
 	_, err = dao.SysConfig.FieldsEx(dao.SysConfig.C.ConfigId, dao.SysConfig.C.CreateBy).
