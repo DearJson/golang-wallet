@@ -14,6 +14,7 @@ import (
 	"io/ioutil"
 	"net/http"
 
+	"filippo.io/edwards25519"
 	"github.com/gogf/gf/frame/g"
 	"github.com/gogf/gf/util/gconv"
 	"github.com/shopspring/decimal"
@@ -295,6 +296,18 @@ func (c *SolanaRpcClient) TransferSPLToken(privateKeyHex string, toAddress strin
 	// 3. 计算Associated Token Account (ATA)
 	fromATA := findAssociatedTokenAddress(fromPubKey, mintPubKey)
 	toATA := findAssociatedTokenAddress(toPubKeyBytes, mintPubKey)
+	if len(fromATA) != 32 || len(toATA) != 32 {
+		return "", fmt.Errorf("derive associated token account failed")
+	}
+	if bytes.Equal(fromATA, toATA) {
+		return "", fmt.Errorf(
+			"invalid transfer: source and destination token account are the same, owner_from=%s owner_to=%s mint=%s ata=%s",
+			hdwallet.SolanaBase58Encode(fromPubKey),
+			toAddress,
+			mint,
+			hdwallet.SolanaBase58Encode(fromATA),
+		)
+	}
 
 	// 4. 获取最新blockhash
 	bhResult, err := c.GetLatestBlockhash()
@@ -319,33 +332,33 @@ func (c *SolanaRpcClient) TransferSPLToken(privateKeyHex string, toAddress strin
 		// 再加transfer指令
 		sysvarRent, _ := hdwallet.SolanaBase58Decode(SysvarRentPubkeyBase58)
 		accountKeys = [][]byte{
-			fromPubKey,          // 0: payer/signer
+			fromPubKey,          // 0: payer/signer (writable, signer)
 			toATA,               // 1: to ATA (writable)
-			toPubKeyBytes,       // 2: to owner
-			mintPubKey,          // 3: mint
-			systemProgramID,     // 4: system program
-			tokenProgramID,      // 5: token program
-			sysvarRent,          // 6: rent sysvar (不需要了,新版可忽略但为兼容保留)
-			assocTokenProgramID, // 7: associated token program
-			fromATA,             // 8: from ATA (writable)
+			fromATA,             // 2: from ATA (writable)
+			toPubKeyBytes,       // 3: to owner (read-only)
+			mintPubKey,          // 4: mint (read-only)
+			systemProgramID,     // 5: system program (read-only)
+			tokenProgramID,      // 6: token program (read-only)
+			sysvarRent,          // 7: rent sysvar (read-only)
+			assocTokenProgramID, // 8: associated token program (read-only)
 		}
-		// 创建ATA指令
+		// 创建ATA指令: accounts=[payer, ata, owner, mint, system, token_program, rent]
 		instructions = append(instructions, solanaInstruction{
-			programIDIndex: 7, // associated token program
-			accounts:       []byte{0, 1, 2, 3, 4, 5, 6},
-			data:           []byte{}, // 空data表示CreateAssociatedTokenAccount
+			programIDIndex: 8, // associated token program
+			accounts:       []byte{0, 1, 3, 4, 5, 6, 7},
+			data:           []byte{},
 		})
-		// Transfer指令
+		// Transfer指令: accounts=[from_ata, to_ata, owner/signer]
 		transferData := make([]byte, 9)
 		transferData[0] = 3 // Transfer instruction index
 		binary.LittleEndian.PutUint64(transferData[1:9], amount)
 		instructions = append(instructions, solanaInstruction{
-			programIDIndex: 5,               // token program
-			accounts:       []byte{8, 1, 0}, // from_ata, to_ata, owner/signer
+			programIDIndex: 6,               // token program
+			accounts:       []byte{2, 1, 0}, // from_ata, to_ata, owner/signer
 			data:           transferData,
 		})
 
-		signedTx := buildAndSignTransaction(privKey, accountKeys, recentBlockhash, instructions, 1, 0, 4)
+		signedTx := buildAndSignTransaction(privKey, accountKeys, recentBlockhash, instructions, 1, 0, 6)
 		return c.sendTransaction(signedTx)
 	}
 
@@ -554,18 +567,11 @@ func newSha256Hasher() hash.Hash {
 }
 
 // isOnCurve 检查点是否在Ed25519曲线上
-// 对于PDA查找，SHA256结果落在曲线上的概率约为1/2，
-// 所以 findProgramAddress 会在几次尝试内找到有效PDA。
-// 这里使用简化检查：尝试用该点做一次签名验证。
+// 使用 edwards25519 点解码做严格判断，避免误判导致PDA推导错误。
 func isOnCurve(point []byte) bool {
 	if len(point) != 32 {
 		return false
 	}
-	// 通过尝试构造公钥并验证一个空签名来检测点是否在曲线上
-	// 如果点不在曲线上，ed25519.Verify 会 panic 或返回 false
-	defer func() { recover() }()
-	pubKey := ed25519.PublicKey(point)
-	// 尝试验证一个任意签名，如果公钥无效会 panic
-	ed25519.Verify(pubKey, []byte("test"), make([]byte, 64))
-	return true
+	_, err := new(edwards25519.Point).SetBytes(point)
+	return err == nil
 }

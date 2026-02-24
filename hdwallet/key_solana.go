@@ -49,12 +49,21 @@ func SolanaBase58Encode(input []byte) string {
 	return base58.Encode(input, solanaAlphabet)
 }
 
-// GetSolanaPrivateKey 从hex字符串获取Ed25519私钥
-func GetSolanaPrivateKey(privateKeyHex string) (ed25519.PrivateKey, error) {
-	privBytes, err := hex.DecodeString(privateKeyHex)
+// GetSolanaPrivateKey 从Base58或hex字符串获取Ed25519私钥
+func GetSolanaPrivateKey(privateKey string) (ed25519.PrivateKey, error) {
+	var privBytes []byte
+	var err error
+
+	// 先尝试Base58解码（Solana最常用格式）
+	privBytes, err = SolanaBase58Decode(privateKey)
 	if err != nil {
-		return nil, fmt.Errorf("decode private key hex error: %v", err)
+		// Base58失败，尝试hex解码
+		privBytes, err = hex.DecodeString(privateKey)
+		if err != nil {
+			return nil, fmt.Errorf("decode private key error (tried base58 and hex): %v", err)
+		}
 	}
+
 	if len(privBytes) != ed25519.PrivateKeySize {
 		return nil, fmt.Errorf("invalid private key length: %d, expected: %d", len(privBytes), ed25519.PrivateKeySize)
 	}

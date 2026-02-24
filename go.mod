@@ -3,6 +3,7 @@ module gfast
 //
 
 require (
+	filippo.io/edwards25519 v1.2.0
 	github.com/casbin/casbin/v2 v2.31.9
 	github.com/ethereum/go-ethereum v1.10.21
 	github.com/fbsobreira/gotron-sdk v0.0.0-20211102183839-58a64f4da5f4
@@ -81,4 +82,6 @@ require (
 
 replace github.com/goflyfox/gtoken v1.4.5 => github.com/tiger1103/gtoken v1.4.8
 
-go 1.18
+go 1.24.0
+
+toolchain go1.24.1
