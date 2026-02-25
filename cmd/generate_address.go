@@ -10,8 +10,6 @@ import (
 )
 
 func main() {
-	//fmt.Printf("%v", library.NewGoogleAuth().GetSecret())
-
 	privateKey, _ := crypto.GenerateKey()
 	privateKeyBytes := crypto.FromECDSA(privateKey)
 	publicKey := privateKey.Public()
