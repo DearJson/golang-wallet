@@ -83,8 +83,7 @@ func (s *solana) Withdraw(r *ghttp.Request) {
 		s.FailJsonExit(r, "暂未配置该币种,无法转账")
 	}
 
-	minAmount, _ := cservice.SysConfig.GetConfigByKey("sys.minWithdrawAudit")
-	if req.Amount <= gconv.Float64(minAmount.ConfigValue) {
+	if req.Amount <= coinInfo.MinWithdraw {
 		req.Status = 2
 	} else {
 		req.Status = 1
