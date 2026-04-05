@@ -208,7 +208,7 @@ func (t *tron) TronBalanceOf(r *ghttp.Request) {
 	rpcUrl := gconv.String(cache.Get("bnb_rpc_url"))
 	client, _ := ethclient.Dial(rpcUrl)
 
-	if r.GetPost("contract_address") == "0x1000000000000000000000000000000000000000" {
+	if r.GetPost("contract_address") == "0x0000000000000000000000000000000000000000" {
 		balance, _ := client.BalanceAt(context.Background(), common.HexToAddress(gconv.String(r.GetPost("address"))), nil)
 		result := make(map[string]string)
 		result["balance"] = gconv.String(balance.String())

@@ -245,7 +245,7 @@ func HecoAddressRechargeHandle(transfer *rpc.HecoTransactions) (err error) {
 	if isContract {
 		contractAddress = transfer.To
 	} else {
-		contractAddress = "0x1000000000000000000000000000000000000000"
+		contractAddress = "0x0000000000000000000000000000000000000000"
 	}
 	if _, ok := coinAddress[contractAddress]; ok == false {
 		return nil

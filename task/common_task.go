@@ -115,7 +115,7 @@ func bscRecharge() {
 		balance := decimal.NewFromBigInt(balanceWei, 0)
 
 		var last decimal.Decimal
-		if value.ContractAddress == "0x1000000000000000000000000000000000000000" {
+		if value.ContractAddress == "0x0000000000000000000000000000000000000000" {
 			amount, _ := decimal.NewFromString(value.Amount)
 			amountWei := amount.Mul(decimal.NewFromInt(int64(math.Pow10(18))))
 
@@ -175,7 +175,7 @@ func bscRecharge() {
 				// 特殊归集逻辑：通过调用合约方法进行归集
 				commonRechargeContract := g.Cfg().GetString("bsc.common_recharge")
 
-				if currency.ContractAddress == "0x1000000000000000000000000000000000000000" {
+				if currency.ContractAddress == "0x0000000000000000000000000000000000000000" {
 					// BNB直接转账
 					hashResult, nonce, _ = rpc.TransferBnb(string(privateKey), convertAmount, bnbMergeAddress.ConfigValue, gconv.Uint64(MaxNonce))
 				} else {
@@ -248,7 +248,7 @@ func bscRecharge() {
 					}
 				}
 			} else {
-				if currency.ContractAddress == "0x1000000000000000000000000000000000000000" {
+				if currency.ContractAddress == "0x0000000000000000000000000000000000000000" {
 					hashResult, nonce, _ = rpc.TransferBnb(string(privateKey), convertAmount, bnbMergeAddress.ConfigValue, gconv.Uint64(MaxNonce))
 				} else {
 					hashResult, nonce, _ = rpc.TransferToken(string(privateKey), convertAmount, bnbMergeAddress.ConfigValue, currency.ContractAddress, gconv.Uint64(MaxNonce))
@@ -301,7 +301,7 @@ func ethRecharge() {
 		g.Log().File("merge_recharge.{Y-m-d}.log").Printf("查询0 %v 余额为 %v", value.ToAddress, balance)
 
 		var last decimal.Decimal
-		if value.ContractAddress == "0x1000000000000000000000000000000000000000" {
+		if value.ContractAddress == "0x0000000000000000000000000000000000000000" {
 			amount, _ := decimal.NewFromString(value.Amount)
 			amountWei := amount.Mul(decimal.NewFromInt(int64(math.Pow10(18))))
 
@@ -364,7 +364,7 @@ func ethRecharge() {
 
 			//查询当前归集地址的最大Nonce
 			MaxNonce, _ := g.Model("recharge").Where("main_chain", "eth").Where("to_address", value.ToAddress).WhereIn("status", [3]int{2, 3, 4}).OrderDesc("id").Value("nonce")
-			if currency.ContractAddress == "0x1000000000000000000000000000000000000000" {
+			if currency.ContractAddress == "0x0000000000000000000000000000000000000000" {
 				hashResult, nonce, _ = rpc.TransferEth(string(privateKey), convertAmount, ethMergeAddress.ConfigValue, gconv.Uint64(MaxNonce))
 			} else {
 				hashResult, nonce, _ = rpc.TransferEthToken(string(privateKey), convertAmount, ethMergeAddress.ConfigValue, currency.ContractAddress, gconv.Uint64(MaxNonce))
@@ -411,7 +411,7 @@ func hecoRecharge() {
 		balance := decimal.NewFromBigInt(balanceWei, 0)
 
 		var last decimal.Decimal
-		if value.ContractAddress == "0x1000000000000000000000000000000000000000" {
+		if value.ContractAddress == "0x0000000000000000000000000000000000000000" {
 			amount, _ := decimal.NewFromString(value.Amount)
 			amountWei := amount.Mul(decimal.NewFromInt(int64(math.Pow10(18))))
 
@@ -467,7 +467,7 @@ func hecoRecharge() {
 
 			//查询当前归集地址的最大Nonce
 			MaxNonce, _ := g.Model("recharge").Where("main_chain", "heco").Where("to_address", value.ToAddress).WhereIn("status", [3]int{2, 3, 4}).OrderDesc("id").Value("nonce")
-			if currency.ContractAddress == "0x1000000000000000000000000000000000000000" {
+			if currency.ContractAddress == "0x0000000000000000000000000000000000000000" {
 				hashResult, nonce, _ = rpc.HecoTransferHt(string(privateKey), convertAmount, hecoMergeAddress.ConfigValue, gconv.Uint64(MaxNonce))
 			} else {
 				hashResult, nonce, _ = rpc.HecoTransferToken(string(privateKey), convertAmount, hecoMergeAddress.ConfigValue, currency.ContractAddress, gconv.Uint64(MaxNonce))
@@ -707,7 +707,7 @@ func wemixRecharge() {
 		balance := decimal.NewFromBigInt(balanceWei, 0)
 
 		var last decimal.Decimal
-		if value.ContractAddress == "0x1000000000000000000000000000000000000000" {
+		if value.ContractAddress == "0x0000000000000000000000000000000000000000" {
 			amount, _ := decimal.NewFromString(value.Amount)
 			amountWei := amount.Mul(decimal.NewFromInt(int64(math.Pow10(18))))
 
@@ -763,7 +763,7 @@ func wemixRecharge() {
 
 			//查询当前归集地址的最大Nonce
 			MaxNonce, _ := g.Model("recharge").Where("main_chain", "wemix").Where("to_address", value.ToAddress).WhereIn("status", [3]int{2, 3, 4}).OrderDesc("id").Value("nonce")
-			if currency.ContractAddress == "0x1000000000000000000000000000000000000000" {
+			if currency.ContractAddress == "0x0000000000000000000000000000000000000000" {
 				hashResult, nonce, _ = rpc.WemixTransferWemix(string(privateKey), convertAmount, wemixMergeAddress.ConfigValue, gconv.Uint64(MaxNonce))
 			} else {
 				hashResult, nonce, _ = rpc.WemixTransferToken(string(privateKey), convertAmount, wemixMergeAddress.ConfigValue, currency.ContractAddress, gconv.Uint64(MaxNonce))
@@ -1017,7 +1017,7 @@ func processAuthorizedRecharge() {
 					}
 				} else {
 					// 普通归集方式
-					if currency.ContractAddress == "0x1000000000000000000000000000000000000000" {
+					if currency.ContractAddress == "0x0000000000000000000000000000000000000000" {
 						hashResult, nonce, _ := rpc.TransferBnb(string(privateKey), convertAmount, bnbMergeAddress.ConfigValue, gconv.Uint64(MaxNonce))
 						if hashResult != nil {
 							g.Model("recharge").Where("id", value.Id).Data(g.Map{"status": 2, "nonce": nonce, "imputation_hash": hashResult}).Update()

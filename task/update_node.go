@@ -14,7 +14,7 @@ func UpdateNode() {
 	cache.Set("bnb_rpc_url", "https://bsc-dataseed.bnbchain.org", 0)
 	//}
 	cache.Set("tron_rpc_url", "grpc.trongrid.io:50051", 0)
-	cache.Set("eth_rpc_url", "https://rpc.naaidepin.co", 0)
+	cache.Set("eth_rpc_url", "https://rpc.pychain.vip", 0)
 	heliusApiKey := g.Config().GetString("helius.api_key")
 	if heliusApiKey != "" {
 		cache.Set("solana_rpc_url", "https://mainnet.helius-rpc.com/?api-key="+heliusApiKey, 0)

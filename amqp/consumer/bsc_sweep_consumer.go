@@ -534,7 +534,7 @@ func handleMainCoinTransfer(transfer *rpc.BscTransactions, userAddress []string,
 	}
 
 	// BNB的合约地址标识
-	contractAddress := "0x1000000000000000000000000000000000000000"
+	contractAddress := "0x0000000000000000000000000000000000000000"
 	coinInfo, exists := coinAddress[contractAddress]
 	if !exists {
 		return nil

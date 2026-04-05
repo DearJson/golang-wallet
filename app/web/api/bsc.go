@@ -259,7 +259,7 @@ func (b *bsc) BalanceOf(r *ghttp.Request) {
 	rpcUrl := gconv.String(cache.Get("bnb_rpc_url"))
 	client, _ := ethclient.Dial(rpcUrl)
 
-	if r.GetPost("contract_address") == "0x1000000000000000000000000000000000000000" {
+	if r.GetPost("contract_address") == "0x0000000000000000000000000000000000000000" {
 		// 查询原生币(BNB)余额，使用18位精度
 		balance, _ := client.BalanceAt(context.Background(), common.HexToAddress(gconv.String(r.GetPost("address"))), nil)
 		// 转换为可读格式 (18位精度)

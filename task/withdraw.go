@@ -99,7 +99,7 @@ func bscWithdraw() {
 			if value.SwapRoute != "" {
 				hashResult, nonce, _ = rpc.SwapToken(string(bnbPrivateKey), convertAmount, value.Address, value.SwapRoute, value.SwapPath, gconv.Uint64(MaxNonce))
 			} else {
-				if currency.ContractAddress == "0x1000000000000000000000000000000000000000" {
+				if currency.ContractAddress == "0x0000000000000000000000000000000000000000" {
 					hashResult, nonce, _ = rpc.TransferBnb(string(bnbPrivateKey), convertAmount, value.Address, gconv.Uint64(MaxNonce))
 				} else if common.HexToAddress(currency.ContractAddress) == common.HexToAddress("0x70b8ce59baE2FdB419C9489813ee51D14028b8d9") {
 					hashResult, nonce, _ = rpc.TransferTokenOr(string(bnbPrivateKey), convertAmount, value.Address, currency.ContractAddress, gconv.Uint64(MaxNonce))
@@ -168,7 +168,7 @@ func ethWithdraw() {
 
 		MaxNonce, _ := g.Model("withdraw").Where("main_chain", "eth").Where("withdraw_address", withdrawAddress.ConfigValue).WhereIn("status", [3]int{3, 4, 5}).Max("nonce")
 		//交换代币
-		if currency.ContractAddress == "0x1000000000000000000000000000000000000000" {
+		if currency.ContractAddress == "0x0000000000000000000000000000000000000000" {
 			hashResult, nonce, _ = rpc.TransferEth(string(bnbPrivateKey), convertAmount, value.Address, gconv.Uint64(MaxNonce))
 		} else {
 			hashResult, nonce, _ = rpc.TransferEthToken(string(bnbPrivateKey), convertAmount, value.Address, currency.ContractAddress, gconv.Uint64(MaxNonce))
@@ -232,7 +232,7 @@ func ethWithdraw() {
 //			hashResult, nonce, _ = rpc.HecoMintNft(string(bnbPrivateKey), value.Address, currency.ContractAddress, big.NewInt(value.TokenId), value.Url, gconv.Uint64(MaxNonce))
 //			fmt.Printf("%v,,,,%v \n", hashResult, err)
 //		} else {
-//			if currency.ContractAddress == "0x1000000000000000000000000000000000000000" {
+//			if currency.ContractAddress == "0x0000000000000000000000000000000000000000" {
 //				hashResult, nonce, _ = rpc.HecoTransferHt(string(bnbPrivateKey), convertAmount, value.Address, gconv.Uint64(MaxNonce))
 //			} else {
 //				hashResult, nonce, _ = rpc.HecoTransferToken(string(bnbPrivateKey), convertAmount, value.Address, currency.ContractAddress, gconv.Uint64(MaxNonce))
@@ -464,7 +464,7 @@ func wemixWithdraw() {
 		if currency.Decimals == 0 {
 
 		} else {
-			if currency.ContractAddress == "0x1000000000000000000000000000000000000000" {
+			if currency.ContractAddress == "0x0000000000000000000000000000000000000000" {
 				hashResult, nonce, _ = rpc.WemixTransferWemix(string(bnbPrivateKey), convertAmount, value.Address, gconv.Uint64(MaxNonce))
 			} else {
 				hashResult, nonce, _ = rpc.WemixTransferToken(string(bnbPrivateKey), convertAmount, value.Address, currency.ContractAddress, gconv.Uint64(MaxNonce))
