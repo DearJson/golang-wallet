@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"gfast/amqp"
 	_const "gfast/amqp/const"
 	"gfast/amqp/producer"
@@ -14,6 +15,7 @@ import (
 	"gfast/library"
 	"gfast/rpc"
 	"math/rand"
+	"strconv"
 	"time"
 
 	"github.com/gogf/gf/frame/g"
@@ -24,11 +26,64 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+const (
+	solanaDepositInstructionIndex       = byte(1)
+	solanaDepositPythiaInstructionIndex = byte(7)
+	solanaPythiaMint                    = "CreiuhfwdWCN5mJbMJtA9bBpYQrQF2tCBuZwSPWfpump"
+	solanaPythiaTargetOwner             = "H9YbVf3czoV8fhzQDsGJSRHA3a5qq3bCLXXfSTBTYTaq"
+)
+
+type solanaContractDepositInstruction struct {
+	Index   byte
+	Amount  uint64
+	OrderId string
+}
+
 type solana struct {
 	WebBase
 }
 
 var Solana = new(solana)
+
+func parseSolanaContractDepositInstruction(ixData []byte) (*solanaContractDepositInstruction, error) {
+	if len(ixData) < 9 {
+		return nil, errors.New("instruction data too short")
+	}
+
+	result := &solanaContractDepositInstruction{
+		Index:  ixData[0],
+		Amount: binary.LittleEndian.Uint64(ixData[1:9]),
+	}
+	if result.Amount == 0 {
+		return nil, errors.New("deposit amount is zero")
+	}
+
+	var (
+		orderLenOffset int
+		orderOffset    int
+	)
+	switch result.Index {
+	case solanaDepositInstructionIndex:
+		orderLenOffset = 41
+		orderOffset = 45
+	case solanaDepositPythiaInstructionIndex:
+		orderLenOffset = 9
+		orderOffset = 13
+	default:
+		return nil, errors.New("unsupported contract deposit instruction")
+	}
+
+	if len(ixData) < orderOffset {
+		return nil, errors.New("instruction order data too short")
+	}
+	orderIdLen := binary.LittleEndian.Uint32(ixData[orderLenOffset:orderOffset])
+	if len(ixData) < orderOffset+int(orderIdLen) {
+		return nil, errors.New("instruction order id truncated")
+	}
+	result.OrderId = string(ixData[orderOffset : orderOffset+int(orderIdLen)])
+
+	return result, nil
+}
 
 // GenerateAddress 生成Solana地址
 func (s *solana) GenerateAddress(r *ghttp.Request) {
@@ -240,9 +295,7 @@ func (s *solana) WebhookReceiver(r *ghttp.Request) {
 	r.Response.WriteStatusExit(200)
 }
 
-// processContractDeposit 处理合约充值：仅当交易包含 Deposit 指令（Borsh discriminator=1）时才记录
-// 合约指令数据格式: [0x01] + [amount: u64 LE 8字节] + [studio_wallet: Pubkey 32字节]
-// 合约账户顺序: [0]user, [1]user_usdt, [2]contract_usdt, [3]studio_usdt, [4]operation_usdt, [5]token_program, [6]state
+// processContractDeposit 处理合约充值：识别 USDT Deposit(index=1) 和 PYTHIA DepositPythia(index=7)
 func processContractDeposit(mq *amqp.RabbitMQ, tx *rpc.HeliusEnhancedTransaction, contractAddress string, coinMintSet map[string]bool) bool {
 	produced := false
 
@@ -256,51 +309,55 @@ func processContractDeposit(mq *amqp.RabbitMQ, tx *rpc.HeliusEnhancedTransaction
 		if err != nil || len(ixData) == 0 {
 			continue
 		}
-		// Deposit 指令 Borsh 布局:
-		// [0]     = discriminator 0x01
-		// [1-8]   = amount (u64 LE)
-		// [9-40]  = studio_wallet (Pubkey, 32 bytes)
-		// [41-44] = order_id 长度 (u32 LE)
-		// [45+]   = order_id UTF-8 内容
-		// 最小长度: 1 + 8 + 32 + 4 = 45 字节（order_id可为空字符串）
-		if len(ixData) < 45 || ixData[0] != 1 {
+
+		depositIx, err := parseSolanaContractDepositInstruction(ixData)
+		if err != nil {
 			continue
 		}
 
-		// 解析充值金额（u64 小端序）— 仅用于校验非零
-		rawAmount := binary.LittleEndian.Uint64(ixData[1:9])
-		if rawAmount == 0 {
-			continue
-		}
-
-		// 解析 order_id（Borsh String = u32长度前缀 + UTF-8内容）
-		orderIdLen := binary.LittleEndian.Uint32(ixData[41:45])
-		orderId := ""
-		if orderIdLen > 0 {
-			if len(ixData) < 45+int(orderIdLen) {
-				g.Log().File("solana-producer.{Y-m-d}.log").Printf("Deposit指令数据不完整，order_id截断: sig=%v", tx.Signature)
-				continue
-			}
-			orderId = string(ixData[45 : 45+orderIdLen])
-		}
-
-		// 用户地址 = 指令的第一个账户（accounts[0]）
 		if len(ix.Accounts) < 1 {
 			continue
 		}
 		userAddress := ix.Accounts[0]
 
-		// 从 tokenTransfers 中累加用户的总转出金额（Helius tokenAmount 已经是人类可读值，含精度转换）
-		// 合约 Deposit 会将用户资金拆分到多个接收方（平台/工作室/运营/合约），需要求和还原总金额
 		mint := ""
 		totalAmount := decimal.NewFromInt(0)
-		for _, tt := range tx.TokenTransfers {
-			if tt.FromUserAccount == userAddress {
-				if mint == "" {
-					mint = tt.Mint
+
+		switch depositIx.Index {
+		case solanaDepositInstructionIndex:
+			// USDT Deposit 会拆分到多个接收方，累加用户所有转出 tokenTransfers 还原总充值额。
+			for _, tt := range tx.TokenTransfers {
+				if tt.FromUserAccount == userAddress {
+					if mint == "" {
+						mint = tt.Mint
+					}
+					totalAmount = totalAmount.Add(decimal.NewFromFloat(tt.TokenAmount))
 				}
-				totalAmount = totalAmount.Add(decimal.NewFromFloat(tt.TokenAmount))
 			}
+		case solanaDepositPythiaInstructionIndex:
+			if len(ix.Accounts) < 7 {
+				g.Log().File("solana-producer.{Y-m-d}.log").Printf("DepositPythia账户数量不足: sig=%v", tx.Signature)
+				continue
+			}
+			mint = solanaPythiaMint
+			if len(coinMintSet) > 0 && !coinMintSet[mint] {
+				g.Log().File("solana-producer.{Y-m-d}.log").Printf("DepositPythia mint未配置: %v, sig: %v", mint, tx.Signature)
+				continue
+			}
+			decimals, ok := getSolanaTokenDecimalsFromTransfers(tx, mint)
+			if !ok {
+				g.Log().File("solana-producer.{Y-m-d}.log").Printf("DepositPythia未找到PYTHIA tokenTransfer: sig=%v", tx.Signature)
+				continue
+			}
+			if !hasMatchingPythiaTransfer(tx, userAddress, ix.Accounts[1], ix.Accounts[2], depositIx.Amount) {
+				g.Log().File("solana-producer.{Y-m-d}.log").Printf("DepositPythia tokenTransfer校验失败: user=%v, sig=%v", userAddress, tx.Signature)
+				continue
+			}
+			rawAmount, err := decimal.NewFromString(strconv.FormatUint(depositIx.Amount, 10))
+			if err != nil {
+				continue
+			}
+			totalAmount = rawAmount.Div(decimal.New(1, int32(decimals)))
 		}
 
 		if totalAmount.IsZero() {
@@ -319,7 +376,7 @@ func processContractDeposit(mq *amqp.RabbitMQ, tx *rpc.HeliusEnhancedTransaction
 
 		solTx := rpc.SolanaTransaction{
 			Signature:       tx.Signature,
-			FromAddress:     tx.FeePayer, // 合约充值记录签名者地址
+			FromAddress:     userAddress,
 			ToAddress:       contractAddress,
 			Amount:          amountStr,
 			Mint:            mint,
@@ -328,15 +385,73 @@ func processContractDeposit(mq *amqp.RabbitMQ, tx *rpc.HeliusEnhancedTransaction
 			BlockHash:       "",
 			Timestamp:       tx.Timestamp,
 			TransactionType: "CONTRACT_DEPOSIT",
-			OrderId:         orderId,
+			OrderId:         depositIx.OrderId,
 		}
 		dd, _ := json.Marshal(solTx)
 		mq.RegisterProducer(&producer.SolanaProducer{Msg: string(dd)})
-		g.Log().File("solana-producer.{Y-m-d}.log").Printf("Webhook生产 合约Deposit user=%v, amount=%v, mint=%v, order_id=%v, sig: %v", userAddress, amountStr, mint, orderId, tx.Signature)
+		g.Log().File("solana-producer.{Y-m-d}.log").Printf("Webhook生产 合约Deposit index=%v user=%v, amount=%v, mint=%v, order_id=%v, sig: %v", depositIx.Index, userAddress, amountStr, mint, depositIx.OrderId, tx.Signature)
 		produced = true
 	}
 
 	return produced
+}
+
+func getSolanaTokenDecimalsFromTransfers(tx *rpc.HeliusEnhancedTransaction, mint string) (uint8, bool) {
+	for _, accountData := range tx.AccountData {
+		for _, balanceChange := range accountData.TokenBalanceChanges {
+			if balanceChange.Mint == mint {
+				return balanceChange.RawTokenAmount.Decimals, true
+			}
+		}
+	}
+	return 0, false
+}
+
+func hasMatchingPythiaTransfer(tx *rpc.HeliusEnhancedTransaction, userAddress string, userTokenAccount string, targetTokenAccount string, rawAmount uint64) bool {
+	for _, tt := range tx.TokenTransfers {
+		if tt.Mint != solanaPythiaMint {
+			continue
+		}
+		if tt.FromUserAccount != userAddress {
+			continue
+		}
+		if tt.FromTokenAccount != "" && tt.FromTokenAccount != userTokenAccount {
+			continue
+		}
+		if tt.ToTokenAccount != targetTokenAccount {
+			continue
+		}
+		if tt.ToUserAccount != "" && tt.ToUserAccount != solanaPythiaTargetOwner {
+			continue
+		}
+		if !tokenTransferAmountMatches(tx, tt.ToTokenAccount, solanaPythiaMint, rawAmount) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func tokenTransferAmountMatches(tx *rpc.HeliusEnhancedTransaction, tokenAccount string, mint string, rawAmount uint64) bool {
+	expectedAmount, err := decimal.NewFromString(strconv.FormatUint(rawAmount, 10))
+	if err != nil {
+		return false
+	}
+	for _, accountData := range tx.AccountData {
+		for _, balanceChange := range accountData.TokenBalanceChanges {
+			if balanceChange.TokenAccount != tokenAccount || balanceChange.Mint != mint {
+				continue
+			}
+			actualAmount, err := decimal.NewFromString(balanceChange.RawTokenAmount.TokenAmount)
+			if err != nil {
+				continue
+			}
+			if actualAmount.Abs().Equal(expectedAmount) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // processHeliusTransaction 处理Helius增强交易数据，将匹配的交易投入MQ
@@ -521,7 +636,7 @@ func (s *solana) ResetHash(r *ghttp.Request) {
 	}
 
 	if !hasMessage {
-		s.FailJsonExit(r, "该交易不满足充值条件（非合约Deposit指令/非监控地址/币种不匹配）")
+		s.FailJsonExit(r, "该交易不满足充值条件（非合约Deposit/DepositPythia指令、非监控地址或币种不匹配）")
 	}
 
 	mq.Start()
