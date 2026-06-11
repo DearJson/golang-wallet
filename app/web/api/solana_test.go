@@ -54,6 +54,30 @@ func TestParseSolanaContractDepositInstructionPythia(t *testing.T) {
 	}
 }
 
+func TestParseSolanaContractDepositInstructionDepositV5(t *testing.T) {
+	orderID := "ORD-V5-001"
+	data := make([]byte, 109+len(orderID))
+	data[0] = solanaDepositV5InstructionIndex
+	binary.LittleEndian.PutUint64(data[1:9], 1234567)
+	binary.LittleEndian.PutUint32(data[105:109], uint32(len(orderID)))
+	copy(data[109:], orderID)
+
+	got, err := parseSolanaContractDepositInstruction(data)
+	if err != nil {
+		t.Fatalf("parseSolanaContractDepositInstruction() error = %v", err)
+	}
+
+	if got.Index != solanaDepositV5InstructionIndex {
+		t.Fatalf("Index = %d, want %d", got.Index, solanaDepositV5InstructionIndex)
+	}
+	if got.Amount != 1234567 {
+		t.Fatalf("Amount = %d, want 1234567", got.Amount)
+	}
+	if got.OrderId != orderID {
+		t.Fatalf("OrderId = %q, want %q", got.OrderId, orderID)
+	}
+}
+
 func TestParseSolanaContractDepositInstructionRejectsTruncatedPythiaOrder(t *testing.T) {
 	data := make([]byte, 13)
 	data[0] = solanaDepositPythiaInstructionIndex

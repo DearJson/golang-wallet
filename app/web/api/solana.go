@@ -29,6 +29,7 @@ import (
 const (
 	solanaDepositInstructionIndex       = byte(1)
 	solanaDepositPythiaInstructionIndex = byte(7)
+	solanaDepositV5InstructionIndex     = byte(9)
 	solanaPythiaMint                    = "CreiuhfwdWCN5mJbMJtA9bBpYQrQF2tCBuZwSPWfpump"
 	solanaPythiaTargetOwner             = "H9YbVf3czoV8fhzQDsGJSRHA3a5qq3bCLXXfSTBTYTaq"
 )
@@ -69,6 +70,9 @@ func parseSolanaContractDepositInstruction(ixData []byte) (*solanaContractDeposi
 	case solanaDepositPythiaInstructionIndex:
 		orderLenOffset = 9
 		orderOffset = 13
+	case solanaDepositV5InstructionIndex:
+		orderLenOffset = 105
+		orderOffset = 109
 	default:
 		return nil, errors.New("unsupported contract deposit instruction")
 	}
@@ -273,7 +277,7 @@ func (s *solana) WebhookReceiver(r *ghttp.Request) {
 	hasMessage := false
 
 	for _, tx := range payload {
-		// 合约充值: 检查交易中是否包含调用充值合约的 Deposit 指令（discriminator=1）
+		// 合约充值: 检查交易中是否包含调用充值合约的 Deposit/DepositV5/DepositPythia 指令
 		if contractRecharge && contractAddress != "" {
 			if processContractDeposit(mq, &tx, contractAddress, coinMintSet) {
 				hasMessage = true
@@ -295,7 +299,7 @@ func (s *solana) WebhookReceiver(r *ghttp.Request) {
 	r.Response.WriteStatusExit(200)
 }
 
-// processContractDeposit 处理合约充值：识别 USDT Deposit(index=1) 和 PYTHIA DepositPythia(index=7)
+// processContractDeposit 处理合约充值：识别 USDT Deposit(index=1)、DepositV5(index=9) 和 PYTHIA DepositPythia(index=7)
 func processContractDeposit(mq *amqp.RabbitMQ, tx *rpc.HeliusEnhancedTransaction, contractAddress string, coinMintSet map[string]bool) bool {
 	produced := false
 
@@ -324,8 +328,8 @@ func processContractDeposit(mq *amqp.RabbitMQ, tx *rpc.HeliusEnhancedTransaction
 		totalAmount := decimal.NewFromInt(0)
 
 		switch depositIx.Index {
-		case solanaDepositInstructionIndex:
-			// USDT Deposit 会拆分到多个接收方，累加用户所有转出 tokenTransfers 还原总充值额。
+		case solanaDepositInstructionIndex, solanaDepositV5InstructionIndex:
+			// USDT Deposit/DepositV5 会拆分到多个接收方，累加用户所有转出 tokenTransfers 还原总充值额。
 			for _, tt := range tx.TokenTransfers {
 				if tt.FromUserAccount == userAddress {
 					if mint == "" {
@@ -636,7 +640,7 @@ func (s *solana) ResetHash(r *ghttp.Request) {
 	}
 
 	if !hasMessage {
-		s.FailJsonExit(r, "该交易不满足充值条件（非合约Deposit/DepositPythia指令、非监控地址或币种不匹配）")
+		s.FailJsonExit(r, "该交易不满足充值条件（非合约Deposit/DepositV5/DepositPythia指令、非监控地址或币种不匹配）")
 	}
 
 	mq.Start()
