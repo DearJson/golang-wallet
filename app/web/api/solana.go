@@ -27,11 +27,13 @@ import (
 )
 
 const (
-	solanaDepositInstructionIndex       = byte(1)
-	solanaDepositPythiaInstructionIndex = byte(7)
-	solanaDepositV5InstructionIndex     = byte(9)
-	solanaPythiaMint                    = "CreiuhfwdWCN5mJbMJtA9bBpYQrQF2tCBuZwSPWfpump"
-	solanaPythiaTargetOwner             = "H9YbVf3czoV8fhzQDsGJSRHA3a5qq3bCLXXfSTBTYTaq"
+	solanaDepositInstructionIndex            = byte(1)
+	solanaDepositPythiaInstructionIndex      = byte(7)
+	solanaDepositV5InstructionIndex          = byte(9)
+	solanaDepositUsdtReserveInstructionIndex = byte(10)
+	solanaPythiaMint                         = "CreiuhfwdWCN5mJbMJtA9bBpYQrQF2tCBuZwSPWfpump"
+	solanaPythiaTargetOwner                  = "H9YbVf3czoV8fhzQDsGJSRHA3a5qq3bCLXXfSTBTYTaq"
+	solanaUsdtReserveAddress                 = "4dVysUQPoLeeC8W57GqQhM9BpyWWw2QZiWtQPdM96F8R"
 )
 
 type solanaContractDepositInstruction struct {
@@ -73,6 +75,9 @@ func parseSolanaContractDepositInstruction(ixData []byte) (*solanaContractDeposi
 	case solanaDepositV5InstructionIndex:
 		orderLenOffset = 105
 		orderOffset = 109
+	case solanaDepositUsdtReserveInstructionIndex:
+		orderLenOffset = 9
+		orderOffset = 13
 	default:
 		return nil, errors.New("unsupported contract deposit instruction")
 	}
@@ -85,6 +90,9 @@ func parseSolanaContractDepositInstruction(ixData []byte) (*solanaContractDeposi
 		return nil, errors.New("instruction order id truncated")
 	}
 	result.OrderId = string(ixData[orderOffset : orderOffset+int(orderIdLen)])
+	if result.Index == solanaDepositUsdtReserveInstructionIndex && len([]byte(result.OrderId)) > 32 {
+		return nil, errors.New("instruction order id too long")
+	}
 
 	return result, nil
 }
@@ -299,7 +307,7 @@ func (s *solana) WebhookReceiver(r *ghttp.Request) {
 	r.Response.WriteStatusExit(200)
 }
 
-// processContractDeposit 处理合约充值：识别 USDT Deposit(index=1)、DepositV5(index=9) 和 PYTHIA DepositPythia(index=7)
+// processContractDeposit 处理合约充值：识别 USDT Deposit(index=1)、DepositV5(index=9)、PYTHIA DepositPythia(index=7) 和 DepositUsdtReserve(index=10)
 func processContractDeposit(mq *amqp.RabbitMQ, tx *rpc.HeliusEnhancedTransaction, contractAddress string, coinMintSet map[string]bool) bool {
 	produced := false
 
@@ -326,6 +334,7 @@ func processContractDeposit(mq *amqp.RabbitMQ, tx *rpc.HeliusEnhancedTransaction
 
 		mint := ""
 		totalAmount := decimal.NewFromInt(0)
+		toAddress := contractAddress
 
 		switch depositIx.Index {
 		case solanaDepositInstructionIndex, solanaDepositV5InstructionIndex:
@@ -337,6 +346,17 @@ func processContractDeposit(mq *amqp.RabbitMQ, tx *rpc.HeliusEnhancedTransaction
 					}
 					totalAmount = totalAmount.Add(decimal.NewFromFloat(tt.TokenAmount))
 				}
+			}
+		case solanaDepositUsdtReserveInstructionIndex:
+			toAddress = solanaUsdtReserveAddress
+			for _, tt := range tx.TokenTransfers {
+				if tt.FromUserAccount != userAddress || tt.ToUserAccount != solanaUsdtReserveAddress {
+					continue
+				}
+				if mint == "" {
+					mint = tt.Mint
+				}
+				totalAmount = totalAmount.Add(decimal.NewFromFloat(tt.TokenAmount))
 			}
 		case solanaDepositPythiaInstructionIndex:
 			if len(ix.Accounts) < 7 {
@@ -365,13 +385,13 @@ func processContractDeposit(mq *amqp.RabbitMQ, tx *rpc.HeliusEnhancedTransaction
 		}
 
 		if totalAmount.IsZero() {
-			g.Log().File("solana-producer.{Y-m-d}.log").Printf("合约Deposit未找到用户tokenTransfer: user=%v, sig=%v", userAddress, tx.Signature)
+			g.Log().File("solana-producer.{Y-m-d}.log").Printf("合约Deposit index=%v 未找到用户tokenTransfer: user=%v, sig=%v", depositIx.Index, userAddress, tx.Signature)
 			continue
 		}
 
 		// 如果配置了币种列表，检查 Mint 是否在列表中
 		if mint != "" && len(coinMintSet) > 0 && !coinMintSet[mint] {
-			g.Log().File("solana-producer.{Y-m-d}.log").Printf("合约Deposit mint不在币种列表: %v, sig: %v", mint, tx.Signature)
+			g.Log().File("solana-producer.{Y-m-d}.log").Printf("合约Deposit index=%v mint不在币种列表: %v, sig: %v", depositIx.Index, mint, tx.Signature)
 			continue
 		}
 
@@ -381,7 +401,7 @@ func processContractDeposit(mq *amqp.RabbitMQ, tx *rpc.HeliusEnhancedTransaction
 		solTx := rpc.SolanaTransaction{
 			Signature:       tx.Signature,
 			FromAddress:     userAddress,
-			ToAddress:       contractAddress,
+			ToAddress:       toAddress,
 			Amount:          amountStr,
 			Mint:            mint,
 			IsToken:         true,

@@ -1,5 +1,7 @@
 package rpc
 
+import "encoding/json"
+
 // ==================== Solana JSON-RPC 请求/响应结构 ====================
 
 // SolanaRpcRequest JSON-RPC 请求
@@ -20,8 +22,9 @@ type SolanaRpcResponse struct {
 
 // SolanaRpcError JSON-RPC 错误
 type SolanaRpcError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
+	Code    int             `json:"code"`
+	Message string          `json:"message"`
+	Data    json.RawMessage `json:"data,omitempty"`
 }
 
 // ==================== Solana 交易相关结构 ====================

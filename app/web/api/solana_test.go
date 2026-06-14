@@ -78,6 +78,43 @@ func TestParseSolanaContractDepositInstructionDepositV5(t *testing.T) {
 	}
 }
 
+func TestParseSolanaContractDepositInstructionDepositUsdtReserve(t *testing.T) {
+	orderID := "ORD-RESERVE-001"
+	data := make([]byte, 13+len(orderID))
+	data[0] = solanaDepositUsdtReserveInstructionIndex
+	binary.LittleEndian.PutUint64(data[1:9], 1000000)
+	binary.LittleEndian.PutUint32(data[9:13], uint32(len(orderID)))
+	copy(data[13:], orderID)
+
+	got, err := parseSolanaContractDepositInstruction(data)
+	if err != nil {
+		t.Fatalf("parseSolanaContractDepositInstruction() error = %v", err)
+	}
+
+	if got.Index != solanaDepositUsdtReserveInstructionIndex {
+		t.Fatalf("Index = %d, want %d", got.Index, solanaDepositUsdtReserveInstructionIndex)
+	}
+	if got.Amount != 1000000 {
+		t.Fatalf("Amount = %d, want 1000000", got.Amount)
+	}
+	if got.OrderId != orderID {
+		t.Fatalf("OrderId = %q, want %q", got.OrderId, orderID)
+	}
+}
+
+func TestParseSolanaContractDepositInstructionRejectsLongReserveOrder(t *testing.T) {
+	orderID := "123456789012345678901234567890123"
+	data := make([]byte, 13+len(orderID))
+	data[0] = solanaDepositUsdtReserveInstructionIndex
+	binary.LittleEndian.PutUint64(data[1:9], 1)
+	binary.LittleEndian.PutUint32(data[9:13], uint32(len(orderID)))
+	copy(data[13:], orderID)
+
+	if _, err := parseSolanaContractDepositInstruction(data); err == nil {
+		t.Fatal("parseSolanaContractDepositInstruction() error = nil, want long reserve order error")
+	}
+}
+
 func TestParseSolanaContractDepositInstructionRejectsTruncatedPythiaOrder(t *testing.T) {
 	data := make([]byte, 13)
 	data[0] = solanaDepositPythiaInstructionIndex

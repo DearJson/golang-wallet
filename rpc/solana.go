@@ -13,6 +13,7 @@ import (
 	"hash"
 	"io/ioutil"
 	"net/http"
+	"strconv"
 
 	"filippo.io/edwards25519"
 	"github.com/gogf/gf/frame/g"
@@ -26,6 +27,9 @@ const (
 	LamportsPerSOL = 1000000000 // 10^9
 	// SOL原生代币标记地址（在currency表中用于标识SOL）
 	SOLNativeMint = "So11111111111111111111111111111111111111112"
+
+	SPLTokenAccountSize       = 165
+	SolanaTxFeeBufferLamports = 10000
 )
 
 // Solana知名程序ID（Base58编码）
@@ -88,9 +92,33 @@ func (c *SolanaRpcClient) rpcCall(method string, params interface{}) (json.RawMe
 		return nil, fmt.Errorf("unmarshal response error: %v", err)
 	}
 	if rpcResp.Error != nil {
-		return nil, fmt.Errorf("rpc error [%d]: %s", rpcResp.Error.Code, rpcResp.Error.Message)
+		return nil, fmt.Errorf("rpc error [%d]: %s%s", rpcResp.Error.Code, rpcResp.Error.Message, formatSolanaRpcErrorData(rpcResp.Error.Data))
 	}
 	return rpcResp.Result, nil
+}
+
+func formatSolanaRpcErrorData(data json.RawMessage) string {
+	if len(data) == 0 || string(data) == "null" {
+		return ""
+	}
+	var detail struct {
+		Logs []string    `json:"logs"`
+		Err  interface{} `json:"err"`
+	}
+	if err := json.Unmarshal(data, &detail); err == nil && (len(detail.Logs) > 0 || detail.Err != nil) {
+		msg := ""
+		if detail.Err != nil {
+			if errBytes, err := json.Marshal(detail.Err); err == nil {
+				msg += fmt.Sprintf(", data.err=%s", string(errBytes))
+			}
+		}
+		if len(detail.Logs) > 0 {
+			logBytes, _ := json.Marshal(detail.Logs)
+			msg += fmt.Sprintf(", logs=%s", string(logBytes))
+		}
+		return msg
+	}
+	return fmt.Sprintf(", data=%s", string(data))
 }
 
 // ==================== 读操作 ====================
@@ -106,6 +134,24 @@ func (c *SolanaRpcClient) GetBalance(address string) (uint64, error) {
 		return 0, err
 	}
 	return balResult.Value, nil
+}
+
+func (c *SolanaRpcClient) getAccountInfo(address string) (*solanaAccountInfo, error) {
+	params := []interface{}{
+		address,
+		map[string]string{"encoding": "jsonParsed"},
+	}
+	result, err := c.rpcCall("getAccountInfo", params)
+	if err != nil {
+		return nil, err
+	}
+	var accountResult struct {
+		Value *solanaAccountInfo `json:"value"`
+	}
+	if err = json.Unmarshal(result, &accountResult); err != nil {
+		return nil, err
+	}
+	return accountResult.Value, nil
 }
 
 // GetTokenAccountsByOwner 查询某个地址拥有的所有SPL Token账户
@@ -200,6 +246,18 @@ func (c *SolanaRpcClient) GetLatestBlockhash() (*SolanaBlockhashResult, error) {
 		return nil, err
 	}
 	return &bhResult, nil
+}
+
+func (c *SolanaRpcClient) GetMinimumBalanceForRentExemption(dataSize uint64) (uint64, error) {
+	result, err := c.rpcCall("getMinimumBalanceForRentExemption", []interface{}{dataSize})
+	if err != nil {
+		return 0, err
+	}
+	var lamports uint64
+	if err = json.Unmarshal(result, &lamports); err != nil {
+		return 0, err
+	}
+	return lamports, nil
 }
 
 // ==================== 写操作（构建+签名+发送交易） ====================
@@ -308,6 +366,60 @@ func (c *SolanaRpcClient) TransferSPLToken(privateKeyHex string, toAddress strin
 			hdwallet.SolanaBase58Encode(fromATA),
 		)
 	}
+	fromATAAddr := hdwallet.SolanaBase58Encode(fromATA)
+	toATAAddr := hdwallet.SolanaBase58Encode(toATA)
+	fromTokenAccount, err := c.getSPLTokenAccountInfo(fromATAAddr)
+	if err != nil {
+		return "", fmt.Errorf("get source token account error: %v", err)
+	}
+	if fromTokenAccount == nil {
+		return "", fmt.Errorf("source token account not found: owner=%s mint=%s ata=%s", hdwallet.SolanaBase58Encode(fromPubKey), mint, fromATAAddr)
+	}
+	if fromTokenAccount.Mint != mint {
+		return "", fmt.Errorf("source token account mint mismatch: ata=%s expected=%s actual=%s", fromATAAddr, mint, fromTokenAccount.Mint)
+	}
+	if fromTokenAccount.Owner != hdwallet.SolanaBase58Encode(fromPubKey) {
+		return "", fmt.Errorf("source token account owner mismatch: ata=%s expected=%s actual=%s", fromATAAddr, hdwallet.SolanaBase58Encode(fromPubKey), fromTokenAccount.Owner)
+	}
+	if fromTokenAccount.Amount < amount {
+		return "", fmt.Errorf("insufficient SPL token balance: owner=%s mint=%s ata=%s balance=%d amount=%d", hdwallet.SolanaBase58Encode(fromPubKey), mint, fromATAAddr, fromTokenAccount.Amount, amount)
+	}
+	toTokenAccount, err := c.getSPLTokenAccountInfo(toATAAddr)
+	if err != nil {
+		return "", fmt.Errorf("get destination token account error: %v", err)
+	}
+	if toTokenAccount != nil {
+		if toTokenAccount.Mint != mint {
+			return "", fmt.Errorf("destination token account mint mismatch: ata=%s expected=%s actual=%s", toATAAddr, mint, toTokenAccount.Mint)
+		}
+		if toTokenAccount.Owner != toAddress {
+			return "", fmt.Errorf("destination token account owner mismatch: ata=%s expected=%s actual=%s", toATAAddr, toAddress, toTokenAccount.Owner)
+		}
+	}
+	if toTokenAccount == nil {
+		fromSOLBalance, err := c.GetBalance(hdwallet.SolanaBase58Encode(fromPubKey))
+		if err != nil {
+			return "", fmt.Errorf("get source SOL balance error: %v", err)
+		}
+		ataRentLamports, err := c.GetMinimumBalanceForRentExemption(SPLTokenAccountSize)
+		if err != nil {
+			return "", fmt.Errorf("get token account rent exemption error: %v", err)
+		}
+		requiredLamports := ataRentLamports + SolanaTxFeeBufferLamports
+		if fromSOLBalance < requiredLamports {
+			return "", fmt.Errorf(
+				"insufficient SOL for creating destination ATA: owner=%s balance=%d required=%d rent=%d fee_buffer=%d destination_owner=%s destination_ata=%s mint=%s",
+				hdwallet.SolanaBase58Encode(fromPubKey),
+				fromSOLBalance,
+				requiredLamports,
+				ataRentLamports,
+				SolanaTxFeeBufferLamports,
+				toAddress,
+				toATAAddr,
+				mint,
+			)
+		}
+	}
 
 	// 4. 获取最新blockhash
 	bhResult, err := c.GetLatestBlockhash()
@@ -320,13 +432,10 @@ func (c *SolanaRpcClient) TransferSPLToken(privateKeyHex string, toAddress strin
 	}
 
 	// 5. 检查目标ATA是否存在，不存在需要创建
-	toATAAddr := hdwallet.SolanaBase58Encode(toATA)
-	toATABalance, err := c.GetBalance(toATAAddr)
-
 	var instructions []solanaInstruction
 	var accountKeys [][]byte
 
-	if err != nil || toATABalance == 0 {
+	if toTokenAccount == nil {
 		// 需要先创建ATA
 		// 创建ATA指令：无data，accounts=[payer, ata, owner, mint, system, token_program]
 		// 再加transfer指令
@@ -433,6 +542,54 @@ type solanaInstruction struct {
 	programIDIndex byte
 	accounts       []byte
 	data           []byte
+}
+
+type splTokenAccountInfo struct {
+	Mint     string
+	Owner    string
+	Amount   uint64
+	Decimals uint8
+}
+
+type solanaAccountInfo struct {
+	Data struct {
+		Parsed struct {
+			Info struct {
+				Mint        string `json:"mint"`
+				Owner       string `json:"owner"`
+				TokenAmount struct {
+					Amount   string `json:"amount"`
+					Decimals uint8  `json:"decimals"`
+				} `json:"tokenAmount"`
+			} `json:"info"`
+			Type string `json:"type"`
+		} `json:"parsed"`
+		Program string `json:"program"`
+	} `json:"data"`
+	Owner string `json:"owner"`
+}
+
+func (c *SolanaRpcClient) getSPLTokenAccountInfo(address string) (*splTokenAccountInfo, error) {
+	account, err := c.getAccountInfo(address)
+	if err != nil {
+		return nil, err
+	}
+	if account == nil {
+		return nil, nil
+	}
+	if account.Owner != TokenProgramIDBase58 || account.Data.Program != "spl-token" || account.Data.Parsed.Type != "account" {
+		return nil, fmt.Errorf("account %s is not an SPL token account", address)
+	}
+	amount, err := strconv.ParseUint(account.Data.Parsed.Info.TokenAmount.Amount, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("parse token balance error: %v", err)
+	}
+	return &splTokenAccountInfo{
+		Mint:     account.Data.Parsed.Info.Mint,
+		Owner:    account.Data.Parsed.Info.Owner,
+		Amount:   amount,
+		Decimals: account.Data.Parsed.Info.TokenAmount.Decimals,
+	}, nil
 }
 
 // buildTransaction 构建Solana交易消息（不含签名）
