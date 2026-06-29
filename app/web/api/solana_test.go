@@ -102,6 +102,52 @@ func TestParseSolanaContractDepositInstructionDepositUsdtReserve(t *testing.T) {
 	}
 }
 
+func TestParseSolanaContractDepositInstructionDepositUsdtSplit(t *testing.T) {
+	orderID := "ORD-SPLIT-001"
+	recipients := []string{
+		"9inG5NgrGUpxo6htR2aKSZXGeYybtg9QaC6iwRNn77D5",
+		"3QqJ9HPYVGb16WzjZ8xWUxEvNPd46Xdm8tYcAE3MLAE6",
+	}
+	amounts := []uint64{270000000, 240000000}
+	data := buildDepositUsdtSplitInstruction(t, 510000000, recipients, amounts, orderID)
+
+	got, err := parseSolanaContractDepositInstruction(data)
+	if err != nil {
+		t.Fatalf("parseSolanaContractDepositInstruction() error = %v", err)
+	}
+
+	if got.Index != solanaDepositUsdtSplitInstructionIndex {
+		t.Fatalf("Index = %d, want %d", got.Index, solanaDepositUsdtSplitInstructionIndex)
+	}
+	if got.Amount != 510000000 {
+		t.Fatalf("Amount = %d, want 510000000", got.Amount)
+	}
+	if got.OrderId != orderID {
+		t.Fatalf("OrderId = %q, want %q", got.OrderId, orderID)
+	}
+	if len(got.Recipients) != len(recipients) {
+		t.Fatalf("Recipients length = %d, want %d", len(got.Recipients), len(recipients))
+	}
+	for i := range recipients {
+		if got.Recipients[i] != recipients[i] {
+			t.Fatalf("Recipients[%d] = %q, want %q", i, got.Recipients[i], recipients[i])
+		}
+		if got.Amounts[i] != amounts[i] {
+			t.Fatalf("Amounts[%d] = %d, want %d", i, got.Amounts[i], amounts[i])
+		}
+	}
+}
+
+func TestParseSolanaContractDepositInstructionRejectsSplitSumMismatch(t *testing.T) {
+	recipients := []string{"9inG5NgrGUpxo6htR2aKSZXGeYybtg9QaC6iwRNn77D5"}
+	amounts := []uint64{999999}
+	data := buildDepositUsdtSplitInstruction(t, 1000000, recipients, amounts, "ORD-SPLIT-BAD")
+
+	if _, err := parseSolanaContractDepositInstruction(data); err == nil {
+		t.Fatal("parseSolanaContractDepositInstruction() error = nil, want split sum mismatch error")
+	}
+}
+
 func TestParseSolanaContractDepositInstructionRejectsLongReserveOrder(t *testing.T) {
 	orderID := "123456789012345678901234567890123"
 	data := make([]byte, 13+len(orderID))
@@ -173,5 +219,103 @@ func TestHasMatchingPythiaTransfer(t *testing.T) {
 	}
 	if hasMatchingPythiaTransfer(tx, "user", "user-pythia-ata", "target-pythia-ata", 999999) {
 		t.Fatal("hasMatchingPythiaTransfer() = true for wrong amount, want false")
+	}
+}
+
+func TestExtractDepositUsdtSplitTransferAmount(t *testing.T) {
+	depositIx := &solanaContractDepositInstruction{
+		Index:      solanaDepositUsdtSplitInstructionIndex,
+		Amount:     510000000,
+		Recipients: []string{"recipient-1", "recipient-2"},
+		Amounts:    []uint64{270000000, 240000000},
+		OrderId:    "ORD-SPLIT-001",
+	}
+	tx := &rpc.HeliusEnhancedTransaction{
+		TokenTransfers: []rpc.HeliusTokenTransfer{
+			{
+				FromTokenAccount: "user-usdt-ata",
+				FromUserAccount:  "user",
+				Mint:             "usdt-mint",
+				ToTokenAccount:   "recipient-1-usdt-ata",
+			},
+			{
+				FromTokenAccount: "user-usdt-ata",
+				FromUserAccount:  "user",
+				Mint:             "usdt-mint",
+				ToTokenAccount:   "recipient-2-usdt-ata",
+			},
+		},
+		AccountData: []rpc.HeliusAccountData{
+			newTokenBalanceChangeAccountData("recipient-1-usdt-ata", "usdt-mint", 6, "270000000"),
+			newTokenBalanceChangeAccountData("recipient-2-usdt-ata", "usdt-mint", 6, "240000000"),
+		},
+	}
+
+	mint, amount, err := extractDepositUsdtSplitTransferAmount(tx, "user", "user-usdt-ata", []string{"recipient-1-usdt-ata", "recipient-2-usdt-ata"}, depositIx)
+	if err != nil {
+		t.Fatalf("extractDepositUsdtSplitTransferAmount() error = %v", err)
+	}
+	if mint != "usdt-mint" {
+		t.Fatalf("mint = %q, want usdt-mint", mint)
+	}
+	if amount.String() != "510" {
+		t.Fatalf("amount = %s, want 510", amount.String())
+	}
+
+	depositIx.Amounts[1] = 239000000
+	if _, _, err := extractDepositUsdtSplitTransferAmount(tx, "user", "user-usdt-ata", []string{"recipient-1-usdt-ata", "recipient-2-usdt-ata"}, depositIx); err == nil {
+		t.Fatal("extractDepositUsdtSplitTransferAmount() error = nil for mismatched amount, want error")
+	}
+}
+
+func buildDepositUsdtSplitInstruction(t *testing.T, amount uint64, recipients []string, amounts []uint64, orderID string) []byte {
+	t.Helper()
+
+	data := make([]byte, 0, 1+8+4+len(recipients)*32+4+len(amounts)*8+4+len(orderID))
+	data = append(data, solanaDepositUsdtSplitInstructionIndex)
+	data = binary.LittleEndian.AppendUint64(data, amount)
+	data = binary.LittleEndian.AppendUint32(data, uint32(len(recipients)))
+	for _, recipient := range recipients {
+		pubkey, err := decodeSolanaInstructionData(recipient)
+		if err != nil {
+			t.Fatalf("decodeSolanaInstructionData(%q) error = %v", recipient, err)
+		}
+		if len(pubkey) != 32 {
+			t.Fatalf("recipient pubkey length = %d, want 32", len(pubkey))
+		}
+		data = append(data, pubkey...)
+	}
+	data = binary.LittleEndian.AppendUint32(data, uint32(len(amounts)))
+	for _, amount := range amounts {
+		data = binary.LittleEndian.AppendUint64(data, amount)
+	}
+	data = binary.LittleEndian.AppendUint32(data, uint32(len(orderID)))
+	data = append(data, orderID...)
+	return data
+}
+
+func newTokenBalanceChangeAccountData(tokenAccount string, mint string, decimals uint8, tokenAmount string) rpc.HeliusAccountData {
+	return rpc.HeliusAccountData{
+		TokenBalanceChanges: []struct {
+			Mint           string `json:"mint"`
+			RawTokenAmount struct {
+				Decimals    uint8  `json:"decimals"`
+				TokenAmount string `json:"tokenAmount"`
+			} `json:"rawTokenAmount"`
+			TokenAccount string `json:"tokenAccount"`
+			UserAccount  string `json:"userAccount"`
+		}{
+			{
+				Mint:         mint,
+				TokenAccount: tokenAccount,
+				RawTokenAmount: struct {
+					Decimals    uint8  `json:"decimals"`
+					TokenAmount string `json:"tokenAmount"`
+				}{
+					Decimals:    decimals,
+					TokenAmount: tokenAmount,
+				},
+			},
+		},
 	}
 }

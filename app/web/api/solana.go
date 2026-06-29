@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -31,15 +32,19 @@ const (
 	solanaDepositPythiaInstructionIndex      = byte(7)
 	solanaDepositV5InstructionIndex          = byte(9)
 	solanaDepositUsdtReserveInstructionIndex = byte(10)
+	solanaDepositUsdtSplitInstructionIndex   = byte(11)
 	solanaPythiaMint                         = "CreiuhfwdWCN5mJbMJtA9bBpYQrQF2tCBuZwSPWfpump"
 	solanaPythiaTargetOwner                  = "H9YbVf3czoV8fhzQDsGJSRHA3a5qq3bCLXXfSTBTYTaq"
 	solanaUsdtReserveAddress                 = "4dVysUQPoLeeC8W57GqQhM9BpyWWw2QZiWtQPdM96F8R"
+	solanaDepositUsdtSplitAuthorization      = "7Pp9D2oAjA59rvuFKVws5fcHr7zzQPb7uWa85x135k9z"
 )
 
 type solanaContractDepositInstruction struct {
-	Index   byte
-	Amount  uint64
-	OrderId string
+	Index      byte
+	Amount     uint64
+	OrderId    string
+	Recipients []string
+	Amounts    []uint64
 }
 
 type solana struct {
@@ -78,6 +83,11 @@ func parseSolanaContractDepositInstruction(ixData []byte) (*solanaContractDeposi
 	case solanaDepositUsdtReserveInstructionIndex:
 		orderLenOffset = 9
 		orderOffset = 13
+	case solanaDepositUsdtSplitInstructionIndex:
+		if err := parseSolanaDepositUsdtSplitInstruction(ixData, result); err != nil {
+			return nil, err
+		}
+		return result, nil
 	default:
 		return nil, errors.New("unsupported contract deposit instruction")
 	}
@@ -95,6 +105,94 @@ func parseSolanaContractDepositInstruction(ixData []byte) (*solanaContractDeposi
 	}
 
 	return result, nil
+}
+
+func parseSolanaDepositUsdtSplitInstruction(ixData []byte, result *solanaContractDepositInstruction) error {
+	offset := 9
+	recipientsLen, err := readBorshU32(ixData, &offset)
+	if err != nil {
+		return err
+	}
+	if recipientsLen == 0 {
+		return errors.New("split recipients is empty")
+	}
+
+	result.Recipients = make([]string, 0, recipientsLen)
+	for i := uint32(0); i < recipientsLen; i++ {
+		if len(ixData) < offset+32 {
+			return errors.New("split recipient pubkey truncated")
+		}
+		result.Recipients = append(result.Recipients, hdwallet.SolanaBase58Encode(ixData[offset:offset+32]))
+		offset += 32
+	}
+
+	amountsLen, err := readBorshU32(ixData, &offset)
+	if err != nil {
+		return err
+	}
+	if amountsLen != recipientsLen {
+		return errors.New("split recipients and amounts length mismatch")
+	}
+
+	result.Amounts = make([]uint64, 0, amountsLen)
+	var total uint64
+	for i := uint32(0); i < amountsLen; i++ {
+		amount, err := readBorshU64(ixData, &offset)
+		if err != nil {
+			return err
+		}
+		if amount == 0 {
+			return errors.New("split amount is zero")
+		}
+		if total > ^uint64(0)-amount {
+			return errors.New("split amount overflow")
+		}
+		total += amount
+		result.Amounts = append(result.Amounts, amount)
+	}
+	if total != result.Amount {
+		return errors.New("split amount sum mismatch")
+	}
+
+	orderIdLen, err := readBorshU32(ixData, &offset)
+	if err != nil {
+		return err
+	}
+	if len(ixData) < offset+int(orderIdLen) {
+		return errors.New("split order id truncated")
+	}
+	result.OrderId = string(ixData[offset : offset+int(orderIdLen)])
+	return nil
+}
+
+func readBorshU32(data []byte, offset *int) (uint32, error) {
+	if len(data) < *offset+4 {
+		return 0, errors.New("borsh u32 truncated")
+	}
+	value := binary.LittleEndian.Uint32(data[*offset : *offset+4])
+	*offset += 4
+	return value, nil
+}
+
+func readBorshU64(data []byte, offset *int) (uint64, error) {
+	if len(data) < *offset+8 {
+		return 0, errors.New("borsh u64 truncated")
+	}
+	value := binary.LittleEndian.Uint64(data[*offset : *offset+8])
+	*offset += 8
+	return value, nil
+}
+
+func decodeSolanaInstructionData(data string) ([]byte, error) {
+	ixData, err := hdwallet.SolanaBase58Decode(data)
+	if err == nil {
+		return ixData, nil
+	}
+	ixData, base64Err := base64.StdEncoding.DecodeString(data)
+	if base64Err == nil {
+		return ixData, nil
+	}
+	return nil, err
 }
 
 // GenerateAddress 生成Solana地址
@@ -307,7 +405,7 @@ func (s *solana) WebhookReceiver(r *ghttp.Request) {
 	r.Response.WriteStatusExit(200)
 }
 
-// processContractDeposit 处理合约充值：识别 USDT Deposit(index=1)、DepositV5(index=9)、PYTHIA DepositPythia(index=7) 和 DepositUsdtReserve(index=10)
+// processContractDeposit 处理合约充值：识别 USDT Deposit(index=1)、DepositV5(index=9)、PYTHIA DepositPythia(index=7)、DepositUsdtReserve(index=10) 和 DepositUsdtSplit(index=11)
 func processContractDeposit(mq *amqp.RabbitMQ, tx *rpc.HeliusEnhancedTransaction, contractAddress string, coinMintSet map[string]bool) bool {
 	produced := false
 
@@ -316,8 +414,7 @@ func processContractDeposit(mq *amqp.RabbitMQ, tx *rpc.HeliusEnhancedTransaction
 			continue
 		}
 
-		// Base58 解码指令数据
-		ixData, err := hdwallet.SolanaBase58Decode(ix.Data)
+		ixData, err := decodeSolanaInstructionData(ix.Data)
 		if err != nil || len(ixData) == 0 {
 			continue
 		}
@@ -357,6 +454,21 @@ func processContractDeposit(mq *amqp.RabbitMQ, tx *rpc.HeliusEnhancedTransaction
 					mint = tt.Mint
 				}
 				totalAmount = totalAmount.Add(decimal.NewFromFloat(tt.TokenAmount))
+			}
+		case solanaDepositUsdtSplitInstructionIndex:
+			if len(ix.Accounts) < 7+len(depositIx.Recipients) {
+				g.Log().File("solana-producer.{Y-m-d}.log").Printf("DepositUsdtSplit账户数量不足: recipients=%v sig=%v", len(depositIx.Recipients), tx.Signature)
+				continue
+			}
+			authorizationIndex := 6 + len(depositIx.Recipients)
+			if ix.Accounts[authorizationIndex] != solanaDepositUsdtSplitAuthorization {
+				g.Log().File("solana-producer.{Y-m-d}.log").Printf("DepositUsdtSplit授权地址不匹配: got=%v sig=%v", ix.Accounts[authorizationIndex], tx.Signature)
+				continue
+			}
+			mint, totalAmount, err = extractDepositUsdtSplitTransferAmount(tx, userAddress, ix.Accounts[1], ix.Accounts[2:2+len(depositIx.Recipients)], depositIx)
+			if err != nil {
+				g.Log().File("solana-producer.{Y-m-d}.log").Printf("DepositUsdtSplit tokenTransfer校验失败: err=%v user=%v sig=%v", err, userAddress, tx.Signature)
+				continue
 			}
 		case solanaDepositPythiaInstructionIndex:
 			if len(ix.Accounts) < 7 {
@@ -418,6 +530,64 @@ func processContractDeposit(mq *amqp.RabbitMQ, tx *rpc.HeliusEnhancedTransaction
 	}
 
 	return produced
+}
+
+func extractDepositUsdtSplitTransferAmount(tx *rpc.HeliusEnhancedTransaction, userAddress string, userTokenAccount string, recipientTokenAccounts []string, depositIx *solanaContractDepositInstruction) (string, decimal.Decimal, error) {
+	decimals, ok := getSplitTokenDecimalsFromTransfers(tx, userTokenAccount, recipientTokenAccounts)
+	if !ok {
+		return "", decimal.Zero, errors.New("token decimals not found")
+	}
+
+	mint := ""
+	seenRecipients := make([]bool, len(recipientTokenAccounts))
+	for _, tt := range tx.TokenTransfers {
+		if tt.FromUserAccount != userAddress {
+			continue
+		}
+		if tt.FromTokenAccount != "" && tt.FromTokenAccount != userTokenAccount {
+			continue
+		}
+		for i, recipientTokenAccount := range recipientTokenAccounts {
+			if seenRecipients[i] || tt.ToTokenAccount != recipientTokenAccount {
+				continue
+			}
+			if !tokenTransferAmountMatches(tx, recipientTokenAccount, tt.Mint, depositIx.Amounts[i]) {
+				return "", decimal.Zero, errors.New("recipient amount mismatch")
+			}
+			if mint == "" {
+				mint = tt.Mint
+			} else if mint != tt.Mint {
+				return "", decimal.Zero, errors.New("recipient mint mismatch")
+			}
+			seenRecipients[i] = true
+		}
+	}
+	for _, seen := range seenRecipients {
+		if !seen {
+			return "", decimal.Zero, errors.New("recipient transfer missing")
+		}
+	}
+
+	rawAmount, err := decimal.NewFromString(strconv.FormatUint(depositIx.Amount, 10))
+	if err != nil {
+		return "", decimal.Zero, err
+	}
+	return mint, rawAmount.Div(decimal.New(1, int32(decimals))), nil
+}
+
+func getSplitTokenDecimalsFromTransfers(tx *rpc.HeliusEnhancedTransaction, userTokenAccount string, recipientTokenAccounts []string) (uint8, bool) {
+	accountSet := map[string]bool{userTokenAccount: true}
+	for _, account := range recipientTokenAccounts {
+		accountSet[account] = true
+	}
+	for _, accountData := range tx.AccountData {
+		for _, balanceChange := range accountData.TokenBalanceChanges {
+			if accountSet[balanceChange.TokenAccount] {
+				return balanceChange.RawTokenAmount.Decimals, true
+			}
+		}
+	}
+	return 0, false
 }
 
 func getSolanaTokenDecimalsFromTransfers(tx *rpc.HeliusEnhancedTransaction, mint string) (uint8, bool) {
