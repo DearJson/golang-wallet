@@ -533,12 +533,13 @@ func processContractDeposit(mq *amqp.RabbitMQ, tx *rpc.HeliusEnhancedTransaction
 }
 
 func extractDepositUsdtSplitTransferAmount(tx *rpc.HeliusEnhancedTransaction, userAddress string, userTokenAccount string, recipientTokenAccounts []string, depositIx *solanaContractDepositInstruction) (string, decimal.Decimal, error) {
-	decimals, ok := getSplitTokenDecimalsFromTransfers(tx, userTokenAccount, recipientTokenAccounts)
+	_, ok := getSplitTokenDecimalsFromTransfers(tx, userTokenAccount, recipientTokenAccounts)
 	if !ok {
 		return "", decimal.Zero, errors.New("token decimals not found")
 	}
 
 	mint := ""
+	totalAmount := decimal.Zero
 	seenRecipients := make([]bool, len(recipientTokenAccounts))
 	for _, tt := range tx.TokenTransfers {
 		if tt.FromUserAccount != userAddress {
@@ -551,13 +552,13 @@ func extractDepositUsdtSplitTransferAmount(tx *rpc.HeliusEnhancedTransaction, us
 			if seenRecipients[i] || tt.ToTokenAccount != recipientTokenAccount {
 				continue
 			}
-			if !tokenTransferAmountMatches(tx, recipientTokenAccount, tt.Mint, depositIx.Amounts[i]) {
-				return "", decimal.Zero, errors.New("recipient amount mismatch")
-			}
 			if mint == "" {
 				mint = tt.Mint
 			} else if mint != tt.Mint {
 				return "", decimal.Zero, errors.New("recipient mint mismatch")
+			}
+			if tt.ToUserAccount != userAddress {
+				totalAmount = totalAmount.Add(decimal.NewFromFloat(tt.TokenAmount))
 			}
 			seenRecipients[i] = true
 		}
@@ -567,12 +568,11 @@ func extractDepositUsdtSplitTransferAmount(tx *rpc.HeliusEnhancedTransaction, us
 			return "", decimal.Zero, errors.New("recipient transfer missing")
 		}
 	}
-
-	rawAmount, err := decimal.NewFromString(strconv.FormatUint(depositIx.Amount, 10))
-	if err != nil {
-		return "", decimal.Zero, err
+	if totalAmount.IsZero() {
+		return "", decimal.Zero, errors.New("recipient transfer amount is zero")
 	}
-	return mint, rawAmount.Div(decimal.New(1, int32(decimals))), nil
+
+	return mint, totalAmount, nil
 }
 
 func getSplitTokenDecimalsFromTransfers(tx *rpc.HeliusEnhancedTransaction, userTokenAccount string, recipientTokenAccounts []string) (uint8, bool) {

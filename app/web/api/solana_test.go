@@ -225,9 +225,9 @@ func TestHasMatchingPythiaTransfer(t *testing.T) {
 func TestExtractDepositUsdtSplitTransferAmount(t *testing.T) {
 	depositIx := &solanaContractDepositInstruction{
 		Index:      solanaDepositUsdtSplitInstructionIndex,
-		Amount:     510000000,
-		Recipients: []string{"recipient-1", "recipient-2"},
-		Amounts:    []uint64{270000000, 240000000},
+		Amount:     536000000,
+		Recipients: []string{"user-change", "recipient-1", "recipient-2", "recipient-3"},
+		Amounts:    []uint64{270000000, 240000000, 16000000, 10000000},
 		OrderId:    "ORD-SPLIT-001",
 	}
 	tx := &rpc.HeliusEnhancedTransaction{
@@ -236,35 +236,56 @@ func TestExtractDepositUsdtSplitTransferAmount(t *testing.T) {
 				FromTokenAccount: "user-usdt-ata",
 				FromUserAccount:  "user",
 				Mint:             "usdt-mint",
+				ToTokenAccount:   "user-change-usdt-ata",
+				ToUserAccount:    "user",
+				TokenAmount:      270,
+			},
+			{
+				FromTokenAccount: "user-usdt-ata",
+				FromUserAccount:  "user",
+				Mint:             "usdt-mint",
 				ToTokenAccount:   "recipient-1-usdt-ata",
+				ToUserAccount:    "recipient-1",
+				TokenAmount:      240,
 			},
 			{
 				FromTokenAccount: "user-usdt-ata",
 				FromUserAccount:  "user",
 				Mint:             "usdt-mint",
 				ToTokenAccount:   "recipient-2-usdt-ata",
+				ToUserAccount:    "recipient-2",
+				TokenAmount:      16,
+			},
+			{
+				FromTokenAccount: "user-usdt-ata",
+				FromUserAccount:  "user",
+				Mint:             "usdt-mint",
+				ToTokenAccount:   "recipient-3-usdt-ata",
+				ToUserAccount:    "recipient-3",
+				TokenAmount:      10,
 			},
 		},
 		AccountData: []rpc.HeliusAccountData{
-			newTokenBalanceChangeAccountData("recipient-1-usdt-ata", "usdt-mint", 6, "270000000"),
-			newTokenBalanceChangeAccountData("recipient-2-usdt-ata", "usdt-mint", 6, "240000000"),
+			newTokenBalanceChangeAccountData("user-change-usdt-ata", "usdt-mint", 6, "0"),
+			newTokenBalanceChangeAccountData("recipient-1-usdt-ata", "usdt-mint", 6, "240000000"),
+			newTokenBalanceChangeAccountData("recipient-2-usdt-ata", "usdt-mint", 6, "16000000"),
+			newTokenBalanceChangeAccountData("recipient-3-usdt-ata", "usdt-mint", 6, "10000000"),
 		},
 	}
 
-	mint, amount, err := extractDepositUsdtSplitTransferAmount(tx, "user", "user-usdt-ata", []string{"recipient-1-usdt-ata", "recipient-2-usdt-ata"}, depositIx)
+	mint, amount, err := extractDepositUsdtSplitTransferAmount(tx, "user", "user-usdt-ata", []string{"user-change-usdt-ata", "recipient-1-usdt-ata", "recipient-2-usdt-ata", "recipient-3-usdt-ata"}, depositIx)
 	if err != nil {
 		t.Fatalf("extractDepositUsdtSplitTransferAmount() error = %v", err)
 	}
 	if mint != "usdt-mint" {
 		t.Fatalf("mint = %q, want usdt-mint", mint)
 	}
-	if amount.String() != "510" {
-		t.Fatalf("amount = %s, want 510", amount.String())
+	if amount.String() != "266" {
+		t.Fatalf("amount = %s, want 266", amount.String())
 	}
 
-	depositIx.Amounts[1] = 239000000
-	if _, _, err := extractDepositUsdtSplitTransferAmount(tx, "user", "user-usdt-ata", []string{"recipient-1-usdt-ata", "recipient-2-usdt-ata"}, depositIx); err == nil {
-		t.Fatal("extractDepositUsdtSplitTransferAmount() error = nil for mismatched amount, want error")
+	if _, _, err := extractDepositUsdtSplitTransferAmount(tx, "user", "user-usdt-ata", []string{"user-change-usdt-ata", "recipient-1-usdt-ata", "recipient-2-usdt-ata", "missing-recipient-usdt-ata"}, depositIx); err == nil {
+		t.Fatal("extractDepositUsdtSplitTransferAmount() error = nil for missing recipient, want error")
 	}
 }
 
