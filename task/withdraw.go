@@ -397,20 +397,45 @@ func solanaWithdraw() {
 			continue
 		}
 
-		var txSig string
+		var prepared *rpc.PreparedSolanaTransaction
 		if value.ContractAddress == rpc.SOLNativeMint {
-			// SOL原生转账
-			txSig, err = rpc.SolanaTransferSOL(string(solanaPrivateKey), value.Address, decimal.NewFromFloat(value.Amount))
+			lamports := decimal.NewFromFloat(value.Amount).Mul(decimal.NewFromInt(rpc.LamportsPerSOL)).IntPart()
+			prepared, err = rpc.SolanaClient.PrepareSOL(string(solanaPrivateKey), value.Address, uint64(lamports))
 		} else {
-			// SPL Token转账
-			txSig, err = rpc.SolanaTransferSPLToken(string(solanaPrivateKey), value.Address, value.ContractAddress, decimal.NewFromFloat(value.Amount), currency.Decimals)
+			tenDecimal := decimal.NewFromInt(1)
+			for i := 0; i < currency.Decimals; i++ {
+				tenDecimal = tenDecimal.Mul(decimal.NewFromInt(10))
+			}
+			tokenAmount := decimal.NewFromFloat(value.Amount).Mul(tenDecimal).IntPart()
+			prepared, err = rpc.SolanaClient.PrepareSPLToken(string(solanaPrivateKey), value.Address, value.ContractAddress, uint64(tokenAmount))
 		}
 
-		if err == nil && txSig != "" {
-			hashKey = library.Md5Data(value.Address, value.ContractAddress, value.Amount, 3, value.Nonce1)
-			g.Model("withdraw").Data(g.Map{"withdraw_address": solanaAddress, "hashKey": hashKey, "hash": txSig, "status": 3}).Where("id", value.Id).Update()
-		} else {
+		if err != nil || prepared == nil {
 			g.Log().File("withdraw.{Y-m-d}.log").Printf("Solana提现失败 id=%v err=%v", id, err)
+			continue
+		}
+
+		// 先持久化本地已确定的 signature，再广播。条件更新保证多实例只会有一个执行者发送。
+		hashKey = library.Md5Data(value.Address, value.ContractAddress, value.Amount, 3, value.Nonce1)
+		result, updateErr := g.Model("withdraw").Data(g.Map{
+			"withdraw_address": solanaAddress,
+			"hashKey":          hashKey,
+			"hash":             prepared.Signature,
+			"nonce":            prepared.LastValidBlockHeight,
+			"status":           3,
+		}).Where("id", value.Id).Where("status", 2).Update()
+		if updateErr != nil {
+			g.Log().File("withdraw.{Y-m-d}.log").Printf("Solana提现保存签名失败 id=%v signature=%v err=%v", id, prepared.Signature, updateErr)
+			continue
+		}
+		affected, affectedErr := result.RowsAffected()
+		if affectedErr != nil || affected != 1 {
+			continue
+		}
+
+		if _, err = rpc.SolanaClient.SendPreparedTransaction(prepared); err != nil {
+			// 广播结果不确定时保持上链中，后续始终按已保存的 signature 核对，禁止生成新交易。
+			g.Log().File("withdraw.{Y-m-d}.log").Printf("Solana提现广播结果不确定 id=%v signature=%v err=%v", id, prepared.Signature, err)
 		}
 	}
 }

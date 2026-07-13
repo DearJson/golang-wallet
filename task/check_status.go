@@ -521,11 +521,17 @@ func solanaCheckStatus() {
 
 	for _, withdraw := range withdrawList {
 		status, err := rpc.SolanaClient.GetSignatureStatus(withdraw.Hash)
-		if err != nil || status == nil {
-			// 超过5分钟未找到则判定为失败
-			if gtime.Timestamp()-withdraw.UpdatedAt.Timestamp() >= 300 {
-				hashKey := library.Md5Data(withdraw.Address, withdraw.ContractAddress, withdraw.Amount, 4, withdraw.Nonce1)
-				g.Model("withdraw").Data(g.Map{"status": 4, "hashKey": hashKey}).Where("id", withdraw.Id).Update()
+		if err != nil {
+			g.Log().File("withdraw.{Y-m-d}.log").Printf("查询Solana提现状态失败 id=%v signature=%v err=%v", withdraw.Id, withdraw.Hash, err)
+			continue
+		}
+		if status == nil {
+			// 单个 RPC 的“查不到”不能证明交易未上链，自动改为失败会开放重提并造成重复提现。
+			if withdraw.Nonce > 0 {
+				blockHeight, heightErr := rpc.SolanaClient.GetBlockHeight()
+				if heightErr == nil && blockHeight > withdraw.Nonce {
+					g.Log().File("withdraw.{Y-m-d}.log").Printf("Solana提现签名未查到且blockhash已过期，需人工核对 id=%v signature=%v lastValidBlockHeight=%v currentBlockHeight=%v", withdraw.Id, withdraw.Hash, withdraw.Nonce, blockHeight)
+				}
 			}
 			continue
 		}

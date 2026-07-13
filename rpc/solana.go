@@ -248,6 +248,19 @@ func (c *SolanaRpcClient) GetLatestBlockhash() (*SolanaBlockhashResult, error) {
 	return &bhResult, nil
 }
 
+// GetBlockHeight 获取当前区块高度。
+func (c *SolanaRpcClient) GetBlockHeight() (uint64, error) {
+	result, err := c.rpcCall("getBlockHeight", []interface{}{})
+	if err != nil {
+		return 0, err
+	}
+	var height uint64
+	if err = json.Unmarshal(result, &height); err != nil {
+		return 0, err
+	}
+	return height, nil
+}
+
 func (c *SolanaRpcClient) GetMinimumBalanceForRentExemption(dataSize uint64) (uint64, error) {
 	result, err := c.rpcCall("getMinimumBalanceForRentExemption", []interface{}{dataSize})
 	if err != nil {
@@ -262,23 +275,38 @@ func (c *SolanaRpcClient) GetMinimumBalanceForRentExemption(dataSize uint64) (ui
 
 // ==================== 写操作（构建+签名+发送交易） ====================
 
-// TransferSOL 转账SOL
-// privateKeyHex: 私钥hex字符串
-// toAddress: 目标地址(Base58)
-// lamports: 转账金额(lamports)
-// 返回: 交易签名, error
-func (c *SolanaRpcClient) TransferSOL(privateKeyHex string, toAddress string, lamports uint64) (string, error) {
+// PreparedSolanaTransaction 是已签名、尚未广播的 Solana 交易。
+type PreparedSolanaTransaction struct {
+	Signature            string
+	RawTransaction       []byte
+	LastValidBlockHeight uint64
+}
+
+func newPreparedSolanaTransaction(signedTx []byte, lastValidBlockHeight uint64) (*PreparedSolanaTransaction, error) {
+	// 当前交易固定只有一个签名，序列化格式为：签名数(1 byte) + 64 byte签名 + message。
+	if len(signedTx) < 65 || signedTx[0] != 1 {
+		return nil, fmt.Errorf("invalid signed transaction")
+	}
+	return &PreparedSolanaTransaction{
+		Signature:            hdwallet.SolanaBase58Encode(signedTx[1:65]),
+		RawTransaction:       signedTx,
+		LastValidBlockHeight: lastValidBlockHeight,
+	}, nil
+}
+
+// PrepareSOL 构建并签名 SOL 转账，但不广播。
+func (c *SolanaRpcClient) PrepareSOL(privateKeyHex string, toAddress string, lamports uint64) (*PreparedSolanaTransaction, error) {
 	// 1. 解析私钥
 	privKey, err := hdwallet.GetSolanaPrivateKey(privateKeyHex)
 	if err != nil {
-		return "", fmt.Errorf("get private key error: %v", err)
+		return nil, fmt.Errorf("get private key error: %v", err)
 	}
 	fromPubKey := privKey.Public().(ed25519.PublicKey)
 
 	// 2. 解析目标地址
 	toPubKey, err := hdwallet.SolanaBase58Decode(toAddress)
 	if err != nil {
-		return "", fmt.Errorf("decode to address error: %v", err)
+		return nil, fmt.Errorf("decode to address error: %v", err)
 	}
 
 	// 3. 解析System Program ID
@@ -287,11 +315,11 @@ func (c *SolanaRpcClient) TransferSOL(privateKeyHex string, toAddress string, la
 	// 4. 获取最新blockhash
 	bhResult, err := c.GetLatestBlockhash()
 	if err != nil {
-		return "", fmt.Errorf("get blockhash error: %v", err)
+		return nil, fmt.Errorf("get blockhash error: %v", err)
 	}
 	recentBlockhash, err := hdwallet.SolanaBase58Decode(bhResult.Value.Blockhash)
 	if err != nil {
-		return "", fmt.Errorf("decode blockhash error: %v", err)
+		return nil, fmt.Errorf("decode blockhash error: %v", err)
 	}
 
 	// 5. 构建System Program Transfer指令
@@ -320,32 +348,40 @@ func (c *SolanaRpcClient) TransferSOL(privateKeyHex string, toAddress string, la
 	// 7. 签名
 	signedTx := signSolanaTransaction(tx, privKey)
 
-	// 8. 发送交易
-	return c.sendTransaction(signedTx)
+	return newPreparedSolanaTransaction(signedTx, bhResult.Value.LastValidBlockHeight)
 }
 
-// TransferSPLToken 转账SPL Token
+// TransferSOL 转账SOL。
+func (c *SolanaRpcClient) TransferSOL(privateKeyHex string, toAddress string, lamports uint64) (string, error) {
+	prepared, err := c.PrepareSOL(privateKeyHex, toAddress, lamports)
+	if err != nil {
+		return "", err
+	}
+	return c.SendPreparedTransaction(prepared)
+}
+
+// PrepareSPLToken 构建并签名 SPL Token 转账，但不广播。
 // privateKeyHex: 私钥hex字符串
 // toAddress: 目标地址(Base58)
 // mint: Token Mint地址(Base58)
 // amount: 转账金额（最小单位）
 // 返回: 交易签名, error
-func (c *SolanaRpcClient) TransferSPLToken(privateKeyHex string, toAddress string, mint string, amount uint64) (string, error) {
+func (c *SolanaRpcClient) PrepareSPLToken(privateKeyHex string, toAddress string, mint string, amount uint64) (*PreparedSolanaTransaction, error) {
 	// 1. 解析私钥
 	privKey, err := hdwallet.GetSolanaPrivateKey(privateKeyHex)
 	if err != nil {
-		return "", fmt.Errorf("get private key error: %v", err)
+		return nil, fmt.Errorf("get private key error: %v", err)
 	}
 	fromPubKey := privKey.Public().(ed25519.PublicKey)
 
 	// 2. 解析各种地址
 	toPubKeyBytes, err := hdwallet.SolanaBase58Decode(toAddress)
 	if err != nil {
-		return "", fmt.Errorf("decode to address error: %v", err)
+		return nil, fmt.Errorf("decode to address error: %v", err)
 	}
 	mintPubKey, err := hdwallet.SolanaBase58Decode(mint)
 	if err != nil {
-		return "", fmt.Errorf("decode mint error: %v", err)
+		return nil, fmt.Errorf("decode mint error: %v", err)
 	}
 	tokenProgramID, _ := hdwallet.SolanaBase58Decode(TokenProgramIDBase58)
 	assocTokenProgramID, _ := hdwallet.SolanaBase58Decode(AssociatedTokenProgramIDBase58)
@@ -355,10 +391,10 @@ func (c *SolanaRpcClient) TransferSPLToken(privateKeyHex string, toAddress strin
 	fromATA := findAssociatedTokenAddress(fromPubKey, mintPubKey)
 	toATA := findAssociatedTokenAddress(toPubKeyBytes, mintPubKey)
 	if len(fromATA) != 32 || len(toATA) != 32 {
-		return "", fmt.Errorf("derive associated token account failed")
+		return nil, fmt.Errorf("derive associated token account failed")
 	}
 	if bytes.Equal(fromATA, toATA) {
-		return "", fmt.Errorf(
+		return nil, fmt.Errorf(
 			"invalid transfer: source and destination token account are the same, owner_from=%s owner_to=%s mint=%s ata=%s",
 			hdwallet.SolanaBase58Encode(fromPubKey),
 			toAddress,
@@ -370,44 +406,44 @@ func (c *SolanaRpcClient) TransferSPLToken(privateKeyHex string, toAddress strin
 	toATAAddr := hdwallet.SolanaBase58Encode(toATA)
 	fromTokenAccount, err := c.getSPLTokenAccountInfo(fromATAAddr)
 	if err != nil {
-		return "", fmt.Errorf("get source token account error: %v", err)
+		return nil, fmt.Errorf("get source token account error: %v", err)
 	}
 	if fromTokenAccount == nil {
-		return "", fmt.Errorf("source token account not found: owner=%s mint=%s ata=%s", hdwallet.SolanaBase58Encode(fromPubKey), mint, fromATAAddr)
+		return nil, fmt.Errorf("source token account not found: owner=%s mint=%s ata=%s", hdwallet.SolanaBase58Encode(fromPubKey), mint, fromATAAddr)
 	}
 	if fromTokenAccount.Mint != mint {
-		return "", fmt.Errorf("source token account mint mismatch: ata=%s expected=%s actual=%s", fromATAAddr, mint, fromTokenAccount.Mint)
+		return nil, fmt.Errorf("source token account mint mismatch: ata=%s expected=%s actual=%s", fromATAAddr, mint, fromTokenAccount.Mint)
 	}
 	if fromTokenAccount.Owner != hdwallet.SolanaBase58Encode(fromPubKey) {
-		return "", fmt.Errorf("source token account owner mismatch: ata=%s expected=%s actual=%s", fromATAAddr, hdwallet.SolanaBase58Encode(fromPubKey), fromTokenAccount.Owner)
+		return nil, fmt.Errorf("source token account owner mismatch: ata=%s expected=%s actual=%s", fromATAAddr, hdwallet.SolanaBase58Encode(fromPubKey), fromTokenAccount.Owner)
 	}
 	if fromTokenAccount.Amount < amount {
-		return "", fmt.Errorf("insufficient SPL token balance: owner=%s mint=%s ata=%s balance=%d amount=%d", hdwallet.SolanaBase58Encode(fromPubKey), mint, fromATAAddr, fromTokenAccount.Amount, amount)
+		return nil, fmt.Errorf("insufficient SPL token balance: owner=%s mint=%s ata=%s balance=%d amount=%d", hdwallet.SolanaBase58Encode(fromPubKey), mint, fromATAAddr, fromTokenAccount.Amount, amount)
 	}
 	toTokenAccount, err := c.getSPLTokenAccountInfo(toATAAddr)
 	if err != nil {
-		return "", fmt.Errorf("get destination token account error: %v", err)
+		return nil, fmt.Errorf("get destination token account error: %v", err)
 	}
 	if toTokenAccount != nil {
 		if toTokenAccount.Mint != mint {
-			return "", fmt.Errorf("destination token account mint mismatch: ata=%s expected=%s actual=%s", toATAAddr, mint, toTokenAccount.Mint)
+			return nil, fmt.Errorf("destination token account mint mismatch: ata=%s expected=%s actual=%s", toATAAddr, mint, toTokenAccount.Mint)
 		}
 		if toTokenAccount.Owner != toAddress {
-			return "", fmt.Errorf("destination token account owner mismatch: ata=%s expected=%s actual=%s", toATAAddr, toAddress, toTokenAccount.Owner)
+			return nil, fmt.Errorf("destination token account owner mismatch: ata=%s expected=%s actual=%s", toATAAddr, toAddress, toTokenAccount.Owner)
 		}
 	}
 	if toTokenAccount == nil {
 		fromSOLBalance, err := c.GetBalance(hdwallet.SolanaBase58Encode(fromPubKey))
 		if err != nil {
-			return "", fmt.Errorf("get source SOL balance error: %v", err)
+			return nil, fmt.Errorf("get source SOL balance error: %v", err)
 		}
 		ataRentLamports, err := c.GetMinimumBalanceForRentExemption(SPLTokenAccountSize)
 		if err != nil {
-			return "", fmt.Errorf("get token account rent exemption error: %v", err)
+			return nil, fmt.Errorf("get token account rent exemption error: %v", err)
 		}
 		requiredLamports := ataRentLamports + SolanaTxFeeBufferLamports
 		if fromSOLBalance < requiredLamports {
-			return "", fmt.Errorf(
+			return nil, fmt.Errorf(
 				"insufficient SOL for creating destination ATA: owner=%s balance=%d required=%d rent=%d fee_buffer=%d destination_owner=%s destination_ata=%s mint=%s",
 				hdwallet.SolanaBase58Encode(fromPubKey),
 				fromSOLBalance,
@@ -424,11 +460,11 @@ func (c *SolanaRpcClient) TransferSPLToken(privateKeyHex string, toAddress strin
 	// 4. 获取最新blockhash
 	bhResult, err := c.GetLatestBlockhash()
 	if err != nil {
-		return "", fmt.Errorf("get blockhash error: %v", err)
+		return nil, fmt.Errorf("get blockhash error: %v", err)
 	}
 	recentBlockhash, err := hdwallet.SolanaBase58Decode(bhResult.Value.Blockhash)
 	if err != nil {
-		return "", fmt.Errorf("decode blockhash error: %v", err)
+		return nil, fmt.Errorf("decode blockhash error: %v", err)
 	}
 
 	// 5. 检查目标ATA是否存在，不存在需要创建
@@ -468,7 +504,7 @@ func (c *SolanaRpcClient) TransferSPLToken(privateKeyHex string, toAddress strin
 		})
 
 		signedTx := buildAndSignTransaction(privKey, accountKeys, recentBlockhash, instructions, 1, 0, 6)
-		return c.sendTransaction(signedTx)
+		return newPreparedSolanaTransaction(signedTx, bhResult.Value.LastValidBlockHeight)
 	}
 
 	// 目标ATA已存在，直接transfer
@@ -490,7 +526,16 @@ func (c *SolanaRpcClient) TransferSPLToken(privateKeyHex string, toAddress strin
 	}
 
 	signedTx := buildAndSignTransaction(privKey, accountKeys, recentBlockhash, instructions, 1, 0, 1)
-	return c.sendTransaction(signedTx)
+	return newPreparedSolanaTransaction(signedTx, bhResult.Value.LastValidBlockHeight)
+}
+
+// TransferSPLToken 转账SPL Token。
+func (c *SolanaRpcClient) TransferSPLToken(privateKeyHex string, toAddress string, mint string, amount uint64) (string, error) {
+	prepared, err := c.PrepareSPLToken(privateKeyHex, toAddress, mint, amount)
+	if err != nil {
+		return "", err
+	}
+	return c.SendPreparedTransaction(prepared)
 }
 
 // sendTransaction 发送已签名的交易
@@ -506,6 +551,21 @@ func (c *SolanaRpcClient) sendTransaction(signedTx []byte) (string, error) {
 		return "", fmt.Errorf("unmarshal tx signature error: %v", err)
 	}
 	return txSig, nil
+}
+
+// SendPreparedTransaction 广播已签名的交易。即使 RPC 响应丢失，调用方仍可用预先得到的 Signature 查询交易。
+func (c *SolanaRpcClient) SendPreparedTransaction(prepared *PreparedSolanaTransaction) (string, error) {
+	if prepared == nil || prepared.Signature == "" || len(prepared.RawTransaction) == 0 {
+		return "", fmt.Errorf("invalid prepared transaction")
+	}
+	signature, err := c.sendTransaction(prepared.RawTransaction)
+	if err != nil {
+		return prepared.Signature, err
+	}
+	if signature != prepared.Signature {
+		return prepared.Signature, fmt.Errorf("rpc returned unexpected signature: got %s want %s", signature, prepared.Signature)
+	}
+	return signature, nil
 }
 
 // ==================== SOL/SPL Token 提现封装 ====================
