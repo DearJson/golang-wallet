@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/binary"
 	"gfast/rpc"
+	"math"
 	"testing"
 )
 
@@ -48,6 +49,41 @@ func TestParseSolanaContractDepositInstructionPythia(t *testing.T) {
 	}
 	if got.Amount != 987654 {
 		t.Fatalf("Amount = %d, want 987654", got.Amount)
+	}
+	if got.OrderId != orderID {
+		t.Fatalf("OrderId = %q, want %q", got.OrderId, orderID)
+	}
+}
+
+func TestParseSolanaContractDepositInstructionPythiaV2(t *testing.T) {
+	orderID := "ORD-PYTHIA-V2-001"
+	studioWallet := "9inG5NgrGUpxo6htR2aKSZXGeYybtg9QaC6iwRNn77D5"
+	line0Wallet := "3QqJ9HPYVGb16WzjZ8xWUxEvNPd46Xdm8tYcAE3MLAE6"
+	operationCenterWallet := solanaPythiaTargetOwner
+	data := buildDepositPythiaV2Instruction(t, 1000003, 1780000000, studioWallet, line0Wallet, operationCenterWallet, orderID)
+
+	got, err := parseSolanaContractDepositInstruction(data)
+	if err != nil {
+		t.Fatalf("parseSolanaContractDepositInstruction() error = %v", err)
+	}
+
+	if got.Index != solanaDepositPythiaV2InstructionIndex {
+		t.Fatalf("Index = %d, want %d", got.Index, solanaDepositPythiaV2InstructionIndex)
+	}
+	if got.Amount != 1000003 {
+		t.Fatalf("Amount = %d, want 1000003", got.Amount)
+	}
+	if got.IssuedAt != 1780000000 {
+		t.Fatalf("IssuedAt = %d, want 1780000000", got.IssuedAt)
+	}
+	if got.StudioWallet != studioWallet {
+		t.Fatalf("StudioWallet = %q, want %q", got.StudioWallet, studioWallet)
+	}
+	if got.Line0Wallet != line0Wallet {
+		t.Fatalf("Line0Wallet = %q, want %q", got.Line0Wallet, line0Wallet)
+	}
+	if got.OperationCenterWallet != operationCenterWallet {
+		t.Fatalf("OperationCenterWallet = %q, want %q", got.OperationCenterWallet, operationCenterWallet)
 	}
 	if got.OrderId != orderID {
 		t.Fatalf("OrderId = %q, want %q", got.OrderId, orderID)
@@ -222,6 +258,108 @@ func TestHasMatchingPythiaTransfer(t *testing.T) {
 	}
 }
 
+func TestExtractDepositPythiaV2TransferAmount(t *testing.T) {
+	depositIx := &solanaContractDepositInstruction{
+		Index:   solanaDepositPythiaV2InstructionIndex,
+		Amount:  1000003,
+		OrderId: "ORD-PYTHIA-V2-001",
+	}
+	tx := &rpc.HeliusEnhancedTransaction{
+		TokenTransfers: []rpc.HeliusTokenTransfer{
+			{
+				FromTokenAccount: "user-pythia-ata",
+				FromUserAccount:  "user",
+				Mint:             solanaPythiaMint,
+				ToTokenAccount:   "target-pythia-ata",
+				ToUserAccount:    solanaPythiaTargetOwner,
+			},
+			{
+				FromTokenAccount: "user-pythia-ata",
+				FromUserAccount:  "user",
+				Mint:             solanaPythiaMint,
+				ToTokenAccount:   "studio-pythia-ata",
+				ToUserAccount:    "studio",
+			},
+			{
+				FromTokenAccount: "user-pythia-ata",
+				FromUserAccount:  "user",
+				Mint:             solanaPythiaMint,
+				ToTokenAccount:   "line0-pythia-ata",
+				ToUserAccount:    "line0",
+			},
+			{
+				FromTokenAccount: "user-pythia-ata",
+				FromUserAccount:  "user",
+				Mint:             solanaPythiaMint,
+				ToTokenAccount:   "operation-pythia-ata",
+				ToUserAccount:    "operation",
+			},
+		},
+		AccountData: []rpc.HeliusAccountData{
+			newTokenBalanceChangeAccountData("target-pythia-ata", solanaPythiaMint, 6, "800003"),
+			newTokenBalanceChangeAccountData("studio-pythia-ata", solanaPythiaMint, 6, "50000"),
+			newTokenBalanceChangeAccountData("line0-pythia-ata", solanaPythiaMint, 6, "50000"),
+			newTokenBalanceChangeAccountData("operation-pythia-ata", solanaPythiaMint, 6, "100000"),
+		},
+	}
+
+	mint, amount, err := extractDepositPythiaV2TransferAmount(tx, "user", "user-pythia-ata", "target-pythia-ata", "studio-pythia-ata", "line0-pythia-ata", "operation-pythia-ata", depositIx)
+	if err != nil {
+		t.Fatalf("extractDepositPythiaV2TransferAmount() error = %v", err)
+	}
+	if mint != solanaPythiaMint {
+		t.Fatalf("mint = %q, want %q", mint, solanaPythiaMint)
+	}
+	if amount.String() != "1.000003" {
+		t.Fatalf("amount = %s, want 1.000003", amount.String())
+	}
+}
+
+func TestExtractDepositPythiaV2TransferAmountRejectsWrongSplit(t *testing.T) {
+	depositIx := &solanaContractDepositInstruction{
+		Index:   solanaDepositPythiaV2InstructionIndex,
+		Amount:  1000003,
+		OrderId: "ORD-PYTHIA-V2-BAD",
+	}
+	tx := &rpc.HeliusEnhancedTransaction{
+		TokenTransfers: []rpc.HeliusTokenTransfer{
+			{
+				FromTokenAccount: "user-pythia-ata",
+				FromUserAccount:  "user",
+				Mint:             solanaPythiaMint,
+				ToTokenAccount:   "target-pythia-ata",
+				ToUserAccount:    solanaPythiaTargetOwner,
+			},
+		},
+		AccountData: []rpc.HeliusAccountData{
+			newTokenBalanceChangeAccountData("target-pythia-ata", solanaPythiaMint, 6, "800002"),
+		},
+	}
+
+	if _, _, err := extractDepositPythiaV2TransferAmount(tx, "user", "user-pythia-ata", "target-pythia-ata", "studio-pythia-ata", "line0-pythia-ata", "operation-pythia-ata", depositIx); err == nil {
+		t.Fatal("extractDepositPythiaV2TransferAmount() error = nil, want split validation error")
+	}
+}
+
+func TestIsSolanaContractDepositProgramIncludesPythiaV2Program(t *testing.T) {
+	if !isSolanaContractDepositProgram(solanaDepositPythiaV2ProgramID, "legacy-program") {
+		t.Fatal("isSolanaContractDepositProgram() = false for pythia v2 program, want true")
+	}
+	if !isSolanaContractDepositProgram("legacy-program", "legacy-program") {
+		t.Fatal("isSolanaContractDepositProgram() = false for configured program, want true")
+	}
+	if isSolanaContractDepositProgram("other-program", "legacy-program") {
+		t.Fatal("isSolanaContractDepositProgram() = true for unrelated program, want false")
+	}
+}
+
+func TestCalculatePythiaV2SplitAmountsDoesNotOverflow(t *testing.T) {
+	targetAmount, studioAmount, line0Amount, operationCenterAmount := calculatePythiaV2SplitAmounts(math.MaxUint64)
+	if targetAmount+studioAmount+line0Amount+operationCenterAmount != math.MaxUint64 {
+		t.Fatal("calculatePythiaV2SplitAmounts() split sum mismatch for MaxUint64")
+	}
+}
+
 func TestExtractDepositUsdtSplitTransferAmount(t *testing.T) {
 	depositIx := &solanaContractDepositInstruction{
 		Index:      solanaDepositUsdtSplitInstructionIndex,
@@ -309,6 +447,28 @@ func buildDepositUsdtSplitInstruction(t *testing.T, amount uint64, recipients []
 	data = binary.LittleEndian.AppendUint32(data, uint32(len(amounts)))
 	for _, amount := range amounts {
 		data = binary.LittleEndian.AppendUint64(data, amount)
+	}
+	data = binary.LittleEndian.AppendUint32(data, uint32(len(orderID)))
+	data = append(data, orderID...)
+	return data
+}
+
+func buildDepositPythiaV2Instruction(t *testing.T, amount uint64, issuedAt int64, studioWallet string, line0Wallet string, operationCenterWallet string, orderID string) []byte {
+	t.Helper()
+
+	data := make([]byte, 0, 117+len(orderID))
+	data = append(data, solanaDepositPythiaV2InstructionIndex)
+	data = binary.LittleEndian.AppendUint64(data, amount)
+	data = binary.LittleEndian.AppendUint64(data, uint64(issuedAt))
+	for _, wallet := range []string{studioWallet, line0Wallet, operationCenterWallet} {
+		pubkey, err := decodeSolanaInstructionData(wallet)
+		if err != nil {
+			t.Fatalf("decodeSolanaInstructionData(%q) error = %v", wallet, err)
+		}
+		if len(pubkey) != 32 {
+			t.Fatalf("wallet pubkey length = %d, want 32", len(pubkey))
+		}
+		data = append(data, pubkey...)
 	}
 	data = binary.LittleEndian.AppendUint32(data, uint32(len(orderID)))
 	data = append(data, orderID...)
