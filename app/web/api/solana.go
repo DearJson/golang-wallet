@@ -567,9 +567,9 @@ func processContractDeposit(mq *amqp.RabbitMQ, tx *rpc.HeliusEnhancedTransaction
 				g.Log().File("solana-producer.{Y-m-d}.log").Printf("DepositPythiaV2授权地址不匹配: got=%v sig=%v", ix.Accounts[10], tx.Signature)
 				continue
 			}
-			mint, totalAmount, err = extractDepositPythiaV2TransferAmount(tx, userAddress, ix.Accounts[1], ix.Accounts[2], ix.Accounts[3], ix.Accounts[4], ix.Accounts[5], depositIx)
+			mint, totalAmount, err = extractDepositPythiaV2Amount(tx, depositIx)
 			if err != nil {
-				g.Log().File("solana-producer.{Y-m-d}.log").Printf("DepositPythiaV2 tokenTransfer校验失败: err=%v user=%v sig=%v", err, userAddress, tx.Signature)
+				g.Log().File("solana-producer.{Y-m-d}.log").Printf("DepositPythiaV2金额解析失败: err=%v user=%v sig=%v", err, userAddress, tx.Signature)
 				continue
 			}
 		}
@@ -653,31 +653,10 @@ func extractDepositUsdtSplitTransferAmount(tx *rpc.HeliusEnhancedTransaction, us
 	return mint, totalAmount, nil
 }
 
-func extractDepositPythiaV2TransferAmount(tx *rpc.HeliusEnhancedTransaction, userAddress string, userTokenAccount string, targetTokenAccount string, studioTokenAccount string, line0TokenAccount string, operationCenterTokenAccount string, depositIx *solanaContractDepositInstruction) (string, decimal.Decimal, error) {
+func extractDepositPythiaV2Amount(tx *rpc.HeliusEnhancedTransaction, depositIx *solanaContractDepositInstruction) (string, decimal.Decimal, error) {
 	decimals, ok := getSolanaTokenDecimalsFromTransfers(tx, solanaPythiaMint)
 	if !ok {
 		return "", decimal.Zero, errors.New("pythia decimals not found")
-	}
-
-	targetAmount, studioAmount, line0Amount, operationCenterAmount := calculatePythiaV2SplitAmounts(depositIx.Amount)
-	expectedTransfers := []struct {
-		tokenAccount string
-		owner        string
-		amount       uint64
-		name         string
-	}{
-		{targetTokenAccount, solanaPythiaTargetOwner, targetAmount, "target"},
-		{studioTokenAccount, depositIx.StudioWallet, studioAmount, "studio"},
-		{line0TokenAccount, depositIx.Line0Wallet, line0Amount, "line0"},
-		{operationCenterTokenAccount, depositIx.OperationCenterWallet, operationCenterAmount, "operation center"},
-	}
-	for _, expected := range expectedTransfers {
-		if expected.amount == 0 {
-			continue
-		}
-		if !hasMatchingPythiaTransferToAccount(tx, userAddress, userTokenAccount, expected.tokenAccount, expected.owner, expected.amount) {
-			return "", decimal.Zero, errors.New("pythia v2 " + expected.name + " transfer mismatch")
-		}
 	}
 
 	rawAmount, err := decimal.NewFromString(strconv.FormatUint(depositIx.Amount, 10))

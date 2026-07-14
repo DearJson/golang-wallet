@@ -258,54 +258,23 @@ func TestHasMatchingPythiaTransfer(t *testing.T) {
 	}
 }
 
-func TestExtractDepositPythiaV2TransferAmount(t *testing.T) {
+func TestExtractDepositPythiaV2Amount(t *testing.T) {
 	depositIx := &solanaContractDepositInstruction{
 		Index:   solanaDepositPythiaV2InstructionIndex,
 		Amount:  1000003,
 		OrderId: "ORD-PYTHIA-V2-001",
 	}
 	tx := &rpc.HeliusEnhancedTransaction{
-		TokenTransfers: []rpc.HeliusTokenTransfer{
-			{
-				FromTokenAccount: "user-pythia-ata",
-				FromUserAccount:  "user",
-				Mint:             solanaPythiaMint,
-				ToTokenAccount:   "target-pythia-ata",
-				ToUserAccount:    solanaPythiaTargetOwner,
-			},
-			{
-				FromTokenAccount: "user-pythia-ata",
-				FromUserAccount:  "user",
-				Mint:             solanaPythiaMint,
-				ToTokenAccount:   "studio-pythia-ata",
-				ToUserAccount:    "studio",
-			},
-			{
-				FromTokenAccount: "user-pythia-ata",
-				FromUserAccount:  "user",
-				Mint:             solanaPythiaMint,
-				ToTokenAccount:   "line0-pythia-ata",
-				ToUserAccount:    "line0",
-			},
-			{
-				FromTokenAccount: "user-pythia-ata",
-				FromUserAccount:  "user",
-				Mint:             solanaPythiaMint,
-				ToTokenAccount:   "operation-pythia-ata",
-				ToUserAccount:    "operation",
-			},
-		},
 		AccountData: []rpc.HeliusAccountData{
 			newTokenBalanceChangeAccountData("target-pythia-ata", solanaPythiaMint, 6, "800003"),
-			newTokenBalanceChangeAccountData("studio-pythia-ata", solanaPythiaMint, 6, "50000"),
-			newTokenBalanceChangeAccountData("line0-pythia-ata", solanaPythiaMint, 6, "50000"),
-			newTokenBalanceChangeAccountData("operation-pythia-ata", solanaPythiaMint, 6, "100000"),
+			// Studio、Line0、Operation Center 可以共用同一个 ATA，净变化为三笔之和。
+			newTokenBalanceChangeAccountData("shared-pythia-ata", solanaPythiaMint, 6, "200000"),
 		},
 	}
 
-	mint, amount, err := extractDepositPythiaV2TransferAmount(tx, "user", "user-pythia-ata", "target-pythia-ata", "studio-pythia-ata", "line0-pythia-ata", "operation-pythia-ata", depositIx)
+	mint, amount, err := extractDepositPythiaV2Amount(tx, depositIx)
 	if err != nil {
-		t.Fatalf("extractDepositPythiaV2TransferAmount() error = %v", err)
+		t.Fatalf("extractDepositPythiaV2Amount() error = %v", err)
 	}
 	if mint != solanaPythiaMint {
 		t.Fatalf("mint = %q, want %q", mint, solanaPythiaMint)
@@ -315,29 +284,15 @@ func TestExtractDepositPythiaV2TransferAmount(t *testing.T) {
 	}
 }
 
-func TestExtractDepositPythiaV2TransferAmountRejectsWrongSplit(t *testing.T) {
+func TestExtractDepositPythiaV2AmountRequiresDecimals(t *testing.T) {
 	depositIx := &solanaContractDepositInstruction{
 		Index:   solanaDepositPythiaV2InstructionIndex,
 		Amount:  1000003,
-		OrderId: "ORD-PYTHIA-V2-BAD",
-	}
-	tx := &rpc.HeliusEnhancedTransaction{
-		TokenTransfers: []rpc.HeliusTokenTransfer{
-			{
-				FromTokenAccount: "user-pythia-ata",
-				FromUserAccount:  "user",
-				Mint:             solanaPythiaMint,
-				ToTokenAccount:   "target-pythia-ata",
-				ToUserAccount:    solanaPythiaTargetOwner,
-			},
-		},
-		AccountData: []rpc.HeliusAccountData{
-			newTokenBalanceChangeAccountData("target-pythia-ata", solanaPythiaMint, 6, "800002"),
-		},
+		OrderId: "ORD-PYTHIA-V2-NO-DECIMALS",
 	}
 
-	if _, _, err := extractDepositPythiaV2TransferAmount(tx, "user", "user-pythia-ata", "target-pythia-ata", "studio-pythia-ata", "line0-pythia-ata", "operation-pythia-ata", depositIx); err == nil {
-		t.Fatal("extractDepositPythiaV2TransferAmount() error = nil, want split validation error")
+	if _, _, err := extractDepositPythiaV2Amount(&rpc.HeliusEnhancedTransaction{}, depositIx); err == nil {
+		t.Fatal("extractDepositPythiaV2Amount() error = nil, want decimals error")
 	}
 }
 
