@@ -484,10 +484,6 @@ func processContractDeposit(mq *amqp.RabbitMQ, tx *rpc.HeliusEnhancedTransaction
 		if err != nil {
 			continue
 		}
-		if ix.ProgramId == solanaDepositPythiaV2ProgramID && depositIx.Index != solanaDepositPythiaV2InstructionIndex {
-			continue
-		}
-
 		if len(ix.Accounts) < 1 {
 			continue
 		}

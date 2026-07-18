@@ -2,6 +2,8 @@ package api
 
 import (
 	"encoding/binary"
+	"gfast/amqp"
+	"gfast/hdwallet"
 	"gfast/rpc"
 	"math"
 	"testing"
@@ -305,6 +307,35 @@ func TestIsSolanaContractDepositProgramIncludesPythiaV2Program(t *testing.T) {
 	}
 	if isSolanaContractDepositProgram("other-program", "legacy-program") {
 		t.Fatal("isSolanaContractDepositProgram() = true for unrelated program, want false")
+	}
+}
+
+func TestProcessContractDepositAcceptsUsdtReserveOnPythiaV2Program(t *testing.T) {
+	orderID := "USDI202607132359011994"
+	data := make([]byte, 13+len(orderID))
+	data[0] = solanaDepositUsdtReserveInstructionIndex
+	binary.LittleEndian.PutUint64(data[1:9], 380000000)
+	binary.LittleEndian.PutUint32(data[9:13], uint32(len(orderID)))
+	copy(data[13:], orderID)
+
+	tx := &rpc.HeliusEnhancedTransaction{
+		Signature: "reserve-signature",
+		Instructions: []rpc.HeliusInstruction{{
+			ProgramId: solanaDepositPythiaV2ProgramID,
+			Accounts:  []string{"user"},
+			Data:      hdwallet.SolanaBase58Encode(data),
+		}},
+		TokenTransfers: []rpc.HeliusTokenTransfer{{
+			FromUserAccount: "user",
+			ToUserAccount:   solanaUsdtReserveAddress,
+			Mint:            "usdt-mint",
+			TokenAmount:     380,
+		}},
+	}
+	mq := amqp.New(&amqp.QueueExchange{})
+
+	if !processContractDeposit(mq, tx, "legacy-program", map[string]bool{"usdt-mint": true}) {
+		t.Fatal("processContractDeposit() = false, want true for DepositUsdtReserve on the new program")
 	}
 }
 
