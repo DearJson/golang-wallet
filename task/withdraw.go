@@ -456,7 +456,21 @@ func solanaWithdraw() {
 			}
 
 			if _, err = rpc.SolanaClient.SendPreparedTransaction(prepared); err != nil {
-				// 广播结果不确定时保持上链中，后续始终按已保存的 signature 核对，禁止生成新交易。
+				if rpc.IsSolanaRPCError(err) {
+					// RPC 已明确拒绝（例如预执行失败），交易没有被接收，可安全标记失败。
+					failedHashKey := library.Md5Data(value.Address, value.ContractAddress, value.Amount, 4, value.Nonce1)
+					if _, updateErr = g.Model("withdraw").Data(g.Map{
+						"hashKey": failedHashKey,
+						"status":  4,
+					}).Where("id", value.Id).Where("status", 3).Where("hash", prepared.Signature).Update(); updateErr != nil {
+						g.Log().File("withdraw.{Y-m-d}.log").Printf("Solana提现广播被拒绝且回写失败 id=%v signature=%v err=%v updateErr=%v", id, prepared.Signature, err, updateErr)
+						continue
+					}
+					g.Log().File("withdraw.{Y-m-d}.log").Printf("Solana提现广播被RPC拒绝 id=%v signature=%v err=%v", id, prepared.Signature, err)
+					continue
+				}
+
+				// 网络超时或响应丢失时结果不确定，保持上链中并按已保存的 signature 核对。
 				g.Log().File("withdraw.{Y-m-d}.log").Printf("Solana提现广播结果不确定 id=%v signature=%v err=%v", id, prepared.Signature, err)
 			}
 		}

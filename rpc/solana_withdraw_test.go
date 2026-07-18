@@ -2,6 +2,7 @@ package rpc
 
 import (
 	"crypto/ed25519"
+	"fmt"
 	"testing"
 
 	"gfast/hdwallet"
@@ -26,6 +27,19 @@ func TestNewPreparedSolanaTransactionUsesSerializedSignature(t *testing.T) {
 	}
 	if prepared.LastValidBlockHeight != 12345 {
 		t.Fatalf("LastValidBlockHeight = %d, want 12345", prepared.LastValidBlockHeight)
+	}
+}
+
+func TestIsSolanaRPCErrorThroughWrapping(t *testing.T) {
+	err := fmt.Errorf("send transaction error: %w", &SolanaRPCError{
+		Code:    -32002,
+		Message: "Transaction simulation failed",
+	})
+	if !IsSolanaRPCError(err) {
+		t.Fatal("IsSolanaRPCError() = false, want true")
+	}
+	if IsSolanaRPCError(fmt.Errorf("rpc request error: timeout")) {
+		t.Fatal("transport error must not be classified as an RPC rejection")
 	}
 }
 

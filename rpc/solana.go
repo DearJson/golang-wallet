@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"gfast/app/common/service"
 	"gfast/hdwallet"
@@ -46,6 +47,24 @@ const (
 type SolanaRpcClient struct{}
 
 var SolanaClient = &SolanaRpcClient{}
+
+// SolanaRPCError means the RPC server received the request and explicitly
+// rejected it. This is different from a transport error where the caller
+// cannot know whether the server accepted the transaction.
+type SolanaRPCError struct {
+	Code    int
+	Message string
+	Data    json.RawMessage
+}
+
+func (e *SolanaRPCError) Error() string {
+	return fmt.Sprintf("rpc error [%d]: %s%s", e.Code, e.Message, formatSolanaRpcErrorData(e.Data))
+}
+
+func IsSolanaRPCError(err error) bool {
+	var rpcErr *SolanaRPCError
+	return errors.As(err, &rpcErr)
+}
 
 // getSolanaRpcUrl 获取Solana RPC URL
 func getSolanaRpcUrl() string {
@@ -92,7 +111,11 @@ func (c *SolanaRpcClient) rpcCall(method string, params interface{}) (json.RawMe
 		return nil, fmt.Errorf("unmarshal response error: %v", err)
 	}
 	if rpcResp.Error != nil {
-		return nil, fmt.Errorf("rpc error [%d]: %s%s", rpcResp.Error.Code, rpcResp.Error.Message, formatSolanaRpcErrorData(rpcResp.Error.Data))
+		return nil, &SolanaRPCError{
+			Code:    rpcResp.Error.Code,
+			Message: rpcResp.Error.Message,
+			Data:    rpcResp.Error.Data,
+		}
 	}
 	return rpcResp.Result, nil
 }
@@ -302,11 +325,25 @@ func (c *SolanaRpcClient) PrepareSOL(privateKeyHex string, toAddress string, lam
 		return nil, fmt.Errorf("get private key error: %v", err)
 	}
 	fromPubKey := privKey.Public().(ed25519.PublicKey)
+	fromAddress := hdwallet.SolanaBase58Encode(fromPubKey)
 
 	// 2. 解析目标地址
 	toPubKey, err := hdwallet.SolanaBase58Decode(toAddress)
 	if err != nil {
 		return nil, fmt.Errorf("decode to address error: %v", err)
+	}
+	fromSOLBalance, err := c.GetBalance(fromAddress)
+	if err != nil {
+		return nil, fmt.Errorf("get source SOL balance error: %v", err)
+	}
+	if lamports > ^uint64(0)-SolanaTxFeeBufferLamports || fromSOLBalance < lamports+SolanaTxFeeBufferLamports {
+		return nil, fmt.Errorf(
+			"insufficient SOL balance: owner=%s balance=%d transfer=%d fee_buffer=%d",
+			fromAddress,
+			fromSOLBalance,
+			lamports,
+			SolanaTxFeeBufferLamports,
+		)
 	}
 
 	// 3. 解析System Program ID
@@ -373,6 +410,7 @@ func (c *SolanaRpcClient) PrepareSPLToken(privateKeyHex string, toAddress string
 		return nil, fmt.Errorf("get private key error: %v", err)
 	}
 	fromPubKey := privKey.Public().(ed25519.PublicKey)
+	fromAddress := hdwallet.SolanaBase58Encode(fromPubKey)
 
 	// 2. 解析各种地址
 	toPubKeyBytes, err := hdwallet.SolanaBase58Decode(toAddress)
@@ -432,29 +470,33 @@ func (c *SolanaRpcClient) PrepareSPLToken(privateKeyHex string, toAddress string
 			return nil, fmt.Errorf("destination token account owner mismatch: ata=%s expected=%s actual=%s", toATAAddr, toAddress, toTokenAccount.Owner)
 		}
 	}
+	fromSOLBalance, err := c.GetBalance(fromAddress)
+	if err != nil {
+		return nil, fmt.Errorf("get source SOL balance error: %v", err)
+	}
+	requiredLamports := uint64(SolanaTxFeeBufferLamports)
 	if toTokenAccount == nil {
-		fromSOLBalance, err := c.GetBalance(hdwallet.SolanaBase58Encode(fromPubKey))
-		if err != nil {
-			return nil, fmt.Errorf("get source SOL balance error: %v", err)
-		}
 		ataRentLamports, err := c.GetMinimumBalanceForRentExemption(SPLTokenAccountSize)
 		if err != nil {
 			return nil, fmt.Errorf("get token account rent exemption error: %v", err)
 		}
-		requiredLamports := ataRentLamports + SolanaTxFeeBufferLamports
-		if fromSOLBalance < requiredLamports {
-			return nil, fmt.Errorf(
-				"insufficient SOL for creating destination ATA: owner=%s balance=%d required=%d rent=%d fee_buffer=%d destination_owner=%s destination_ata=%s mint=%s",
-				hdwallet.SolanaBase58Encode(fromPubKey),
-				fromSOLBalance,
-				requiredLamports,
-				ataRentLamports,
-				SolanaTxFeeBufferLamports,
-				toAddress,
-				toATAAddr,
-				mint,
-			)
+		if ataRentLamports > ^uint64(0)-requiredLamports {
+			return nil, fmt.Errorf("required SOL balance overflow")
 		}
+		requiredLamports += ataRentLamports
+	}
+	if fromSOLBalance < requiredLamports {
+		return nil, fmt.Errorf(
+			"insufficient SOL for SPL transfer: owner=%s balance=%d required=%d fee_buffer=%d create_destination_ata=%t destination_owner=%s destination_ata=%s mint=%s",
+			fromAddress,
+			fromSOLBalance,
+			requiredLamports,
+			SolanaTxFeeBufferLamports,
+			toTokenAccount == nil,
+			toAddress,
+			toATAAddr,
+			mint,
+		)
 	}
 
 	// 4. 获取最新blockhash
@@ -541,10 +583,14 @@ func (c *SolanaRpcClient) TransferSPLToken(privateKeyHex string, toAddress strin
 // sendTransaction 发送已签名的交易
 func (c *SolanaRpcClient) sendTransaction(signedTx []byte) (string, error) {
 	encoded := base64.StdEncoding.EncodeToString(signedTx)
-	params := []interface{}{encoded, map[string]string{"encoding": "base64"}}
+	params := []interface{}{encoded, map[string]interface{}{
+		"encoding":            "base64",
+		"preflightCommitment": "confirmed",
+		"maxRetries":          5,
+	}}
 	result, err := c.rpcCall("sendTransaction", params)
 	if err != nil {
-		return "", fmt.Errorf("send transaction error: %v", err)
+		return "", fmt.Errorf("send transaction error: %w", err)
 	}
 	var txSig string
 	if err = json.Unmarshal(result, &txSig); err != nil {
