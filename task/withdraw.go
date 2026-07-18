@@ -15,6 +15,8 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+const solanaWithdrawBatchSizePerCurrency = 20
+
 // 出金任务
 func withdrawTask() {
 	if g.Config().GetBool("bsc.contract_recharge") || g.Config().GetBool("bsc.address_recharge") {
@@ -367,11 +369,18 @@ func solanaWithdraw() {
 		return
 	}
 
-	ids, err := g.Model("withdraw").Where("main_chain", "solana").Where("status", 2).Limit(20).Array("id")
+	// Each currency gets its own batch. A currency with insufficient balance remains
+	// pending for retry, but must not occupy the processing window of other currencies.
+	contractAddresses, err := g.Model("withdraw").
+		Where("main_chain", "solana").
+		Where("status", 2).
+		Group("contract_address").
+		Array("contract_address")
 	if err != nil {
+		g.Log().File("withdraw.{Y-m-d}.log").Printf("查询Solana待出金币种失败 err=%v", err)
 		return
 	}
-	if len(ids) == 0 {
+	if len(contractAddresses) == 0 {
 		g.Log().File("withdraw.{Y-m-d}.log").Printf("Solana未找到需要出金的记录")
 		return
 	}
@@ -379,63 +388,77 @@ func solanaWithdraw() {
 	solanaPrivateKey, _ := library.DecryptByAes(solanaWithdrawPrivateKeyConfig.ConfigValue)
 	solanaAddress := solanaWithdrawAddressConfig.ConfigValue
 
-	for _, id := range ids {
-		var value *model.Withdraw
-		var currency *model.Currency
-		g.Model("withdraw").Where("id", id).Where("status", 2).FindScan(&value)
-		if value == nil {
-			continue
-		}
-		g.Model("currency").Where("main_chain", "solana").Where("contract_address", value.ContractAddress).FindScan(&currency)
-		if currency == nil {
-			continue
-		}
-
-		hashKey := library.Md5Data(value.Address, value.ContractAddress, value.Amount, value.Status, value.Nonce1)
-		if hashKey != value.HashKey {
-			g.Model("withdraw").Data(g.Map{"status": 0}).Where("id", value.Id).Update()
+	for _, contractAddress := range contractAddresses {
+		ids, queryErr := g.Model("withdraw").
+			Where("main_chain", "solana").
+			Where("status", 2).
+			Where("contract_address", contractAddress.String()).
+			Order("id ASC").
+			Limit(solanaWithdrawBatchSizePerCurrency).
+			Array("id")
+		if queryErr != nil {
+			g.Log().File("withdraw.{Y-m-d}.log").Printf("查询Solana待出金记录失败 contract_address=%v err=%v", contractAddress.String(), queryErr)
 			continue
 		}
 
-		var prepared *rpc.PreparedSolanaTransaction
-		if value.ContractAddress == rpc.SOLNativeMint {
-			lamports := decimal.NewFromFloat(value.Amount).Mul(decimal.NewFromInt(rpc.LamportsPerSOL)).IntPart()
-			prepared, err = rpc.SolanaClient.PrepareSOL(string(solanaPrivateKey), value.Address, uint64(lamports))
-		} else {
-			tenDecimal := decimal.NewFromInt(1)
-			for i := 0; i < currency.Decimals; i++ {
-				tenDecimal = tenDecimal.Mul(decimal.NewFromInt(10))
+		for _, id := range ids {
+			var value *model.Withdraw
+			var currency *model.Currency
+			g.Model("withdraw").Where("id", id).Where("status", 2).FindScan(&value)
+			if value == nil {
+				continue
 			}
-			tokenAmount := decimal.NewFromFloat(value.Amount).Mul(tenDecimal).IntPart()
-			prepared, err = rpc.SolanaClient.PrepareSPLToken(string(solanaPrivateKey), value.Address, value.ContractAddress, uint64(tokenAmount))
-		}
+			g.Model("currency").Where("main_chain", "solana").Where("contract_address", value.ContractAddress).FindScan(&currency)
+			if currency == nil {
+				continue
+			}
 
-		if err != nil || prepared == nil {
-			g.Log().File("withdraw.{Y-m-d}.log").Printf("Solana提现失败 id=%v err=%v", id, err)
-			continue
-		}
+			hashKey := library.Md5Data(value.Address, value.ContractAddress, value.Amount, value.Status, value.Nonce1)
+			if hashKey != value.HashKey {
+				g.Model("withdraw").Data(g.Map{"status": 0}).Where("id", value.Id).Update()
+				continue
+			}
 
-		// 先持久化本地已确定的 signature，再广播。条件更新保证多实例只会有一个执行者发送。
-		hashKey = library.Md5Data(value.Address, value.ContractAddress, value.Amount, 3, value.Nonce1)
-		result, updateErr := g.Model("withdraw").Data(g.Map{
-			"withdraw_address": solanaAddress,
-			"hashKey":          hashKey,
-			"hash":             prepared.Signature,
-			"nonce":            prepared.LastValidBlockHeight,
-			"status":           3,
-		}).Where("id", value.Id).Where("status", 2).Update()
-		if updateErr != nil {
-			g.Log().File("withdraw.{Y-m-d}.log").Printf("Solana提现保存签名失败 id=%v signature=%v err=%v", id, prepared.Signature, updateErr)
-			continue
-		}
-		affected, affectedErr := result.RowsAffected()
-		if affectedErr != nil || affected != 1 {
-			continue
-		}
+			var prepared *rpc.PreparedSolanaTransaction
+			if value.ContractAddress == rpc.SOLNativeMint {
+				lamports := decimal.NewFromFloat(value.Amount).Mul(decimal.NewFromInt(rpc.LamportsPerSOL)).IntPart()
+				prepared, err = rpc.SolanaClient.PrepareSOL(string(solanaPrivateKey), value.Address, uint64(lamports))
+			} else {
+				tenDecimal := decimal.NewFromInt(1)
+				for i := 0; i < currency.Decimals; i++ {
+					tenDecimal = tenDecimal.Mul(decimal.NewFromInt(10))
+				}
+				tokenAmount := decimal.NewFromFloat(value.Amount).Mul(tenDecimal).IntPart()
+				prepared, err = rpc.SolanaClient.PrepareSPLToken(string(solanaPrivateKey), value.Address, value.ContractAddress, uint64(tokenAmount))
+			}
 
-		if _, err = rpc.SolanaClient.SendPreparedTransaction(prepared); err != nil {
-			// 广播结果不确定时保持上链中，后续始终按已保存的 signature 核对，禁止生成新交易。
-			g.Log().File("withdraw.{Y-m-d}.log").Printf("Solana提现广播结果不确定 id=%v signature=%v err=%v", id, prepared.Signature, err)
+			if err != nil || prepared == nil {
+				g.Log().File("withdraw.{Y-m-d}.log").Printf("Solana提现失败 id=%v err=%v", id, err)
+				continue
+			}
+
+			// 先持久化本地已确定的 signature，再广播。条件更新保证多实例只会有一个执行者发送。
+			hashKey = library.Md5Data(value.Address, value.ContractAddress, value.Amount, 3, value.Nonce1)
+			result, updateErr := g.Model("withdraw").Data(g.Map{
+				"withdraw_address": solanaAddress,
+				"hashKey":          hashKey,
+				"hash":             prepared.Signature,
+				"nonce":            prepared.LastValidBlockHeight,
+				"status":           3,
+			}).Where("id", value.Id).Where("status", 2).Update()
+			if updateErr != nil {
+				g.Log().File("withdraw.{Y-m-d}.log").Printf("Solana提现保存签名失败 id=%v signature=%v err=%v", id, prepared.Signature, updateErr)
+				continue
+			}
+			affected, affectedErr := result.RowsAffected()
+			if affectedErr != nil || affected != 1 {
+				continue
+			}
+
+			if _, err = rpc.SolanaClient.SendPreparedTransaction(prepared); err != nil {
+				// 广播结果不确定时保持上链中，后续始终按已保存的 signature 核对，禁止生成新交易。
+				g.Log().File("withdraw.{Y-m-d}.log").Printf("Solana提现广播结果不确定 id=%v signature=%v err=%v", id, prepared.Signature, err)
+			}
 		}
 	}
 }
