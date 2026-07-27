@@ -18,7 +18,7 @@ type solanaCurrency struct {
 
 var SolanaCurrency = new(solanaCurrency)
 
-func validateSolanaWithdrawSplit(enabled int8, address string, amount float64, decimals int) error {
+func validateSolanaWithdrawSplit(enabled int8, address string, amount float64, bps, decimals int) error {
 	if enabled != 0 && enabled != 1 {
 		return fmt.Errorf("提现分账开关只能为0或1")
 	}
@@ -29,16 +29,26 @@ func validateSolanaWithdrawSplit(enabled int8, address string, amount float64, d
 	if err != nil || len(addressBytes) != 32 {
 		return fmt.Errorf("提现分账地址不是有效的Solana地址")
 	}
+	if bps < 0 || bps >= 10000 {
+		return fmt.Errorf("提现分账比例必须在1到9999基点之间")
+	}
 	splitAmount := decimal.NewFromFloat(amount)
-	if !splitAmount.IsPositive() {
-		return fmt.Errorf("提现分账数量必须大于0")
+	if splitAmount.IsNegative() {
+		return fmt.Errorf("提现固定分账数量不能小于0")
+	}
+	hasFixedAmount := splitAmount.IsPositive()
+	hasRate := bps > 0
+	if hasFixedAmount == hasRate {
+		return fmt.Errorf("提现固定分账数量和分账比例必须二选一")
 	}
 	if decimals < 0 || decimals > 255 {
 		return fmt.Errorf("币种精度无效")
 	}
-	scaledAmount := splitAmount.Mul(decimal.New(1, int32(decimals)))
-	if !scaledAmount.Equal(scaledAmount.Truncate(0)) {
-		return fmt.Errorf("提现分账数量不能超过币种精度")
+	if hasFixedAmount {
+		scaledAmount := splitAmount.Mul(decimal.New(1, int32(decimals)))
+		if !scaledAmount.Equal(scaledAmount.Truncate(0)) {
+			return fmt.Errorf("提现分账数量不能超过币种精度")
+		}
 	}
 	return nil
 }
@@ -70,7 +80,7 @@ func (c *solanaCurrency) Add(r *ghttp.Request) {
 		c.FailJsonExit(r, err.(gvalid.Error).FirstString())
 	}
 	req.MainChain = "solana"
-	if err := validateSolanaWithdrawSplit(req.WithdrawSplitEnabled, req.WithdrawSplitAddress, req.WithdrawSplitAmount, req.Decimals); err != nil {
+	if err := validateSolanaWithdrawSplit(req.WithdrawSplitEnabled, req.WithdrawSplitAddress, req.WithdrawSplitAmount, req.WithdrawSplitBps, req.Decimals); err != nil {
 		c.FailJsonExit(r, err.Error())
 	}
 	err := service.Currency.Add(r.GetCtx(), req)
@@ -100,7 +110,7 @@ func (c *solanaCurrency) Edit(r *ghttp.Request) {
 		c.FailJsonExit(r, err.(gvalid.Error).FirstString())
 	}
 	req.MainChain = "solana"
-	if err := validateSolanaWithdrawSplit(req.WithdrawSplitEnabled, req.WithdrawSplitAddress, req.WithdrawSplitAmount, req.Decimals); err != nil {
+	if err := validateSolanaWithdrawSplit(req.WithdrawSplitEnabled, req.WithdrawSplitAddress, req.WithdrawSplitAmount, req.WithdrawSplitBps, req.Decimals); err != nil {
 		c.FailJsonExit(r, err.Error())
 	}
 	err := service.Currency.Edit(r.GetCtx(), req)

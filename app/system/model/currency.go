@@ -21,6 +21,7 @@ type Currency struct {
 	WithdrawSplitEnabled int8        `orm:"withdraw_split_enabled" json:"withdrawSplitEnabled"`
 	WithdrawSplitAddress string      `orm:"withdraw_split_address" json:"withdrawSplitAddress"`
 	WithdrawSplitAmount  string      `orm:"withdraw_split_amount" json:"withdrawSplitAmount"`
+	WithdrawSplitBps     uint16      `orm:"withdraw_split_bps" json:"withdrawSplitBps"`
 	CreatedAt            *gtime.Time `orm:"created_at" json:"createdAt"` //
 	UpdatedAt            *gtime.Time `orm:"updated_at" json:"updatedAt"` //
 }

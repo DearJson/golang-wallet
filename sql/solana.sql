@@ -87,9 +87,10 @@ CREATE TABLE `currency` (
   `decimals` int NOT NULL COMMENT '精度',
   `min_withdraw` decimal(15,2) unsigned NOT NULL DEFAULT '0.00' COMMENT '最低提现金额',
   `min_merge` decimal(15,2) unsigned NOT NULL DEFAULT '0.00' COMMENT '最低归集金额',
-  `withdraw_split_enabled` tinyint unsigned NOT NULL DEFAULT '0' COMMENT 'Solana提现固定分账开关：0关闭，1开启',
-  `withdraw_split_address` varchar(255) CHARACTER SET utf8mb3 COLLATE utf8mb3_general_ci DEFAULT NULL COMMENT 'Solana提现固定分账地址',
+  `withdraw_split_enabled` tinyint unsigned NOT NULL DEFAULT '0' COMMENT 'Solana提现分账开关：0关闭，1开启',
+  `withdraw_split_address` varchar(255) CHARACTER SET utf8mb3 COLLATE utf8mb3_general_ci DEFAULT NULL COMMENT 'Solana提现分账地址',
   `withdraw_split_amount` decimal(30,18) unsigned NOT NULL DEFAULT '0.000000000000000000' COMMENT 'Solana提现固定分账数量',
+  `withdraw_split_bps` smallint unsigned NOT NULL DEFAULT '0' COMMENT 'Solana提现分账比例（基点，200=2%）',
   `created_at` timestamp NULL DEFAULT NULL,
   `updated_at` timestamp NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`) USING BTREE

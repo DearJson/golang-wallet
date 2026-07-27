@@ -398,17 +398,40 @@ func buildSolanaWithdrawTransfers(value *model.Withdraw, currency *model.Currenc
 	if currency.WithdrawSplitAddress == value.Address {
 		return nil, "", "", fmt.Errorf("Solana withdraw split address equals user address: currency=%s address=%s", currency.Name, value.Address)
 	}
-	splitAmount, err := decimal.NewFromString(currency.WithdrawSplitAmount)
-	if err != nil {
+	fixedAmountText := currency.WithdrawSplitAmount
+	if fixedAmountText == "" {
+		fixedAmountText = "0"
+	}
+	fixedSplitAmount, err := decimal.NewFromString(fixedAmountText)
+	if err != nil || fixedSplitAmount.IsNegative() {
 		return nil, "", "", fmt.Errorf("invalid Solana withdraw split amount: currency=%s amount=%s", currency.Name, currency.WithdrawSplitAmount)
 	}
-	scaledSplitAmount := splitAmount.Mul(decimal.New(1, int32(currency.Decimals)))
-	if !scaledSplitAmount.Equal(scaledSplitAmount.Truncate(0)) {
-		return nil, "", "", fmt.Errorf("Solana withdraw split amount exceeds currency precision: currency=%s amount=%s decimals=%d", currency.Name, splitAmount.String(), currency.Decimals)
+	if currency.WithdrawSplitBps >= 10000 {
+		return nil, "", "", fmt.Errorf("invalid Solana withdraw split bps: currency=%s bps=%d", currency.Name, currency.WithdrawSplitBps)
 	}
-	splitUnits, err := solanaAmountToBaseUnits(splitAmount, currency.Decimals)
-	if err != nil {
-		return nil, "", "", fmt.Errorf("invalid Solana withdraw split amount: currency=%s: %v", currency.Name, err)
+	hasFixedAmount := fixedSplitAmount.IsPositive()
+	hasRate := currency.WithdrawSplitBps > 0
+	if hasFixedAmount == hasRate {
+		return nil, "", "", fmt.Errorf("Solana fixed split amount and split bps must be mutually exclusive: currency=%s", currency.Name)
+	}
+
+	var splitUnits uint64
+	if hasRate {
+		numerator := new(big.Int).Mul(new(big.Int).SetUint64(totalUnits), big.NewInt(int64(currency.WithdrawSplitBps)))
+		splitInteger := new(big.Int).Div(numerator, big.NewInt(10000))
+		if splitInteger.Sign() <= 0 {
+			return nil, "", "", fmt.Errorf("Solana percentage split amount is less than one base unit: currency=%s total=%d bps=%d", currency.Name, totalUnits, currency.WithdrawSplitBps)
+		}
+		splitUnits = splitInteger.Uint64()
+	} else {
+		scaledSplitAmount := fixedSplitAmount.Mul(decimal.New(1, int32(currency.Decimals)))
+		if !scaledSplitAmount.Equal(scaledSplitAmount.Truncate(0)) {
+			return nil, "", "", fmt.Errorf("Solana withdraw split amount exceeds currency precision: currency=%s amount=%s decimals=%d", currency.Name, fixedSplitAmount.String(), currency.Decimals)
+		}
+		splitUnits, err = solanaAmountToBaseUnits(fixedSplitAmount, currency.Decimals)
+		if err != nil {
+			return nil, "", "", fmt.Errorf("invalid Solana withdraw split amount: currency=%s: %v", currency.Name, err)
+		}
 	}
 	if splitUnits >= totalUnits {
 		return nil, "", "", fmt.Errorf("Solana withdraw split amount must be less than total: currency=%s total=%d split=%d", currency.Name, totalUnits, splitUnits)

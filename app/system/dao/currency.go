@@ -47,6 +47,7 @@ type CurrencyAddReq struct {
 	WithdrawSplitEnabled int8    `p:"withdraw_split_enabled"`
 	WithdrawSplitAddress string  `p:"withdraw_split_address"`
 	WithdrawSplitAmount  float64 `p:"withdraw_split_amount"`
+	WithdrawSplitBps     int     `p:"withdraw_split_bps"`
 }
 
 // CurrencyEditReq 修改操作请求参数
@@ -61,4 +62,5 @@ type CurrencyEditReq struct {
 	WithdrawSplitEnabled int8    `p:"withdraw_split_enabled"`
 	WithdrawSplitAddress string  `p:"withdraw_split_address"`
 	WithdrawSplitAmount  float64 `p:"withdraw_split_amount"`
+	WithdrawSplitBps     int     `p:"withdraw_split_bps"`
 }

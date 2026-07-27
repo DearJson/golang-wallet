@@ -30,6 +30,7 @@ type CurrencyColumns struct {
 	WithdrawSplitEnabled string // Solana提现分账开关
 	WithdrawSplitAddress string // Solana提现分账地址
 	WithdrawSplitAmount  string // Solana提现固定分账数量
+	WithdrawSplitBps     string // Solana提现分账比例（基点）
 	CreatedAt            string //
 	UpdatedAt            string //
 }
@@ -43,6 +44,7 @@ var currencyColumns = CurrencyColumns{
 	WithdrawSplitEnabled: "withdraw_split_enabled",
 	WithdrawSplitAddress: "withdraw_split_address",
 	WithdrawSplitAmount:  "withdraw_split_amount",
+	WithdrawSplitBps:     "withdraw_split_bps",
 	CreatedAt:            "created_at",
 	UpdatedAt:            "updated_at",
 }
