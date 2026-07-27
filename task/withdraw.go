@@ -359,6 +359,67 @@ func nacWithdraw() {
 	}
 }
 
+func solanaAmountToBaseUnits(amount decimal.Decimal, decimals int) (uint64, error) {
+	if decimals < 0 || decimals > 255 {
+		return 0, fmt.Errorf("invalid Solana currency decimals: %d", decimals)
+	}
+	scaled := amount.Mul(decimal.New(1, int32(decimals))).Truncate(0)
+	if !scaled.IsPositive() {
+		return 0, fmt.Errorf("Solana transfer amount is less than one base unit: amount=%s decimals=%d", amount.String(), decimals)
+	}
+	integer := scaled.BigInt()
+	if integer.Sign() < 0 || integer.BitLen() > 64 {
+		return 0, fmt.Errorf("Solana transfer amount exceeds uint64: amount=%s decimals=%d", amount.String(), decimals)
+	}
+	return integer.Uint64(), nil
+}
+
+func solanaBaseUnitsToAmount(amount uint64, decimals int) string {
+	return decimal.NewFromBigInt(new(big.Int).SetUint64(amount), int32(-decimals)).String()
+}
+
+func buildSolanaWithdrawTransfers(value *model.Withdraw, currency *model.Currency) ([]rpc.SolanaTransfer, string, string, error) {
+	if value == nil || currency == nil {
+		return nil, "", "", fmt.Errorf("Solana withdrawal or currency is nil")
+	}
+	totalUnits, err := solanaAmountToBaseUnits(decimal.NewFromFloat(value.Amount), currency.Decimals)
+	if err != nil {
+		return nil, "", "", err
+	}
+	if currency.WithdrawSplitEnabled == 0 {
+		return []rpc.SolanaTransfer{{ToAddress: value.Address, Amount: totalUnits}}, "", "0", nil
+	}
+	if currency.WithdrawSplitEnabled != 1 {
+		return nil, "", "", fmt.Errorf("invalid Solana withdraw split switch: currency=%s value=%d", currency.Name, currency.WithdrawSplitEnabled)
+	}
+	if currency.WithdrawSplitAddress == "" {
+		return nil, "", "", fmt.Errorf("Solana withdraw split address is empty: currency=%s", currency.Name)
+	}
+	if currency.WithdrawSplitAddress == value.Address {
+		return nil, "", "", fmt.Errorf("Solana withdraw split address equals user address: currency=%s address=%s", currency.Name, value.Address)
+	}
+	splitAmount, err := decimal.NewFromString(currency.WithdrawSplitAmount)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("invalid Solana withdraw split amount: currency=%s amount=%s", currency.Name, currency.WithdrawSplitAmount)
+	}
+	scaledSplitAmount := splitAmount.Mul(decimal.New(1, int32(currency.Decimals)))
+	if !scaledSplitAmount.Equal(scaledSplitAmount.Truncate(0)) {
+		return nil, "", "", fmt.Errorf("Solana withdraw split amount exceeds currency precision: currency=%s amount=%s decimals=%d", currency.Name, splitAmount.String(), currency.Decimals)
+	}
+	splitUnits, err := solanaAmountToBaseUnits(splitAmount, currency.Decimals)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("invalid Solana withdraw split amount: currency=%s: %v", currency.Name, err)
+	}
+	if splitUnits >= totalUnits {
+		return nil, "", "", fmt.Errorf("Solana withdraw split amount must be less than total: currency=%s total=%d split=%d", currency.Name, totalUnits, splitUnits)
+	}
+	actualSplitAmount := solanaBaseUnitsToAmount(splitUnits, currency.Decimals)
+	return []rpc.SolanaTransfer{
+		{ToAddress: value.Address, Amount: totalUnits - splitUnits},
+		{ToAddress: currency.WithdrawSplitAddress, Amount: splitUnits},
+	}, currency.WithdrawSplitAddress, actualSplitAmount, nil
+}
+
 func solanaWithdraw() {
 	g.Log().File("withdraw.{Y-m-d}.log").Printf("开始处理Solana出金任务")
 	solanaWithdrawPrivateKeyConfig, _ := service.SysConfig.GetConfigByKey("sys.solanaWithdrawAddressPrivateKey")
@@ -419,17 +480,17 @@ func solanaWithdraw() {
 				continue
 			}
 
+			transfers, splitAddress, splitAmount, buildErr := buildSolanaWithdrawTransfers(value, currency)
+			if buildErr != nil {
+				g.Log().File("withdraw.{Y-m-d}.log").Printf("Solana提现分账配置无效 id=%v err=%v", id, buildErr)
+				continue
+			}
+
 			var prepared *rpc.PreparedSolanaTransaction
 			if value.ContractAddress == rpc.SOLNativeMint {
-				lamports := decimal.NewFromFloat(value.Amount).Mul(decimal.NewFromInt(rpc.LamportsPerSOL)).IntPart()
-				prepared, err = rpc.SolanaClient.PrepareSOL(string(solanaPrivateKey), value.Address, uint64(lamports))
+				prepared, err = rpc.SolanaClient.PrepareSOLTransfers(string(solanaPrivateKey), transfers)
 			} else {
-				tenDecimal := decimal.NewFromInt(1)
-				for i := 0; i < currency.Decimals; i++ {
-					tenDecimal = tenDecimal.Mul(decimal.NewFromInt(10))
-				}
-				tokenAmount := decimal.NewFromFloat(value.Amount).Mul(tenDecimal).IntPart()
-				prepared, err = rpc.SolanaClient.PrepareSPLToken(string(solanaPrivateKey), value.Address, value.ContractAddress, uint64(tokenAmount))
+				prepared, err = rpc.SolanaClient.PrepareSPLTokenTransfers(string(solanaPrivateKey), value.ContractAddress, transfers)
 			}
 
 			if err != nil || prepared == nil {
@@ -444,6 +505,8 @@ func solanaWithdraw() {
 				"hashKey":          hashKey,
 				"hash":             prepared.Signature,
 				"nonce":            prepared.LastValidBlockHeight,
+				"split_address":    splitAddress,
+				"split_amount":     splitAmount,
 				"status":           3,
 			}).Where("id", value.Id).Where("status", 2).Update()
 			if updateErr != nil {

@@ -34,18 +34,21 @@ const (
 	solanaDepositUsdtReserveInstructionIndex = byte(10)
 	solanaDepositUsdtSplitInstructionIndex   = byte(11)
 	solanaDepositPythiaV2InstructionIndex    = byte(12)
+	solanaDepositPythiaV3InstructionIndex    = byte(13)
 	solanaDepositPythiaV2ProgramID           = "HhCGLqMrRgoU4M1ymA42gbtKmkbQCVYBz3oDWZziBWAo"
 	solanaPythiaMint                         = "CreiuhfwdWCN5mJbMJtA9bBpYQrQF2tCBuZwSPWfpump"
 	solanaPythiaTargetOwner                  = "H9YbVf3czoV8fhzQDsGJSRHA3a5qq3bCLXXfSTBTYTaq"
 	solanaUsdtReserveAddress                 = "4dVysUQPoLeeC8W57GqQhM9BpyWWw2QZiWtQPdM96F8R"
 	solanaDepositUsdtSplitAuthorization      = "7Pp9D2oAjA59rvuFKVws5fcHr7zzQPb7uWa85x135k9z"
 	solanaDepositPythiaV2Authorization       = "7Pp9D2oAjA59rvuFKVws5fcHr7zzQPb7uWa85x135k9z"
+	solanaDepositPythiaV3Authorization       = solanaDepositPythiaV2Authorization
 )
 
 type solanaContractDepositInstruction struct {
 	Index                 byte
 	Amount                uint64
 	IssuedAt              int64
+	ExtraWallet           string
 	StudioWallet          string
 	Line0Wallet           string
 	OperationCenterWallet string
@@ -100,6 +103,11 @@ func parseSolanaContractDepositInstruction(ixData []byte) (*solanaContractDeposi
 			return nil, err
 		}
 		return result, nil
+	case solanaDepositPythiaV3InstructionIndex:
+		if err := parseSolanaDepositPythiaV3Instruction(ixData, result); err != nil {
+			return nil, err
+		}
+		return result, nil
 	default:
 		return nil, errors.New("unsupported contract deposit instruction")
 	}
@@ -147,6 +155,40 @@ func parseSolanaDepositPythiaV2Instruction(ixData []byte, result *solanaContract
 	result.OrderId = string(ixData[offset : offset+int(orderIdLen)])
 	if len([]byte(result.OrderId)) > 32 {
 		return errors.New("pythia v2 order id too long")
+	}
+	return nil
+}
+
+func parseSolanaDepositPythiaV3Instruction(ixData []byte, result *solanaContractDepositInstruction) error {
+	offset := 9
+	issuedAt, err := readBorshI64(ixData, &offset)
+	if err != nil {
+		return err
+	}
+	result.IssuedAt = issuedAt
+
+	if len(ixData) < offset+32*4 {
+		return errors.New("pythia v3 wallet pubkey truncated")
+	}
+	result.ExtraWallet = hdwallet.SolanaBase58Encode(ixData[offset : offset+32])
+	offset += 32
+	result.StudioWallet = hdwallet.SolanaBase58Encode(ixData[offset : offset+32])
+	offset += 32
+	result.Line0Wallet = hdwallet.SolanaBase58Encode(ixData[offset : offset+32])
+	offset += 32
+	result.OperationCenterWallet = hdwallet.SolanaBase58Encode(ixData[offset : offset+32])
+	offset += 32
+
+	orderIdLen, err := readBorshU32(ixData, &offset)
+	if err != nil {
+		return err
+	}
+	if len(ixData) < offset+int(orderIdLen) {
+		return errors.New("pythia v3 order id truncated")
+	}
+	result.OrderId = string(ixData[offset : offset+int(orderIdLen)])
+	if len([]byte(result.OrderId)) > 32 {
+		return errors.New("pythia v3 order id too long")
 	}
 	return nil
 }
@@ -444,7 +486,7 @@ func (s *solana) WebhookReceiver(r *ghttp.Request) {
 	hasMessage := false
 
 	for _, tx := range payload {
-		// 合约充值: 检查交易中是否包含调用充值合约的 Deposit/DepositV5/DepositPythia 指令
+		// 合约充值: 检查交易中是否包含调用充值合约的 Deposit/DepositV5/DepositPythia/V2/V3 指令
 		if contractRecharge && hasSolanaContractDepositProgram(contractAddress) {
 			if processContractDeposit(mq, &tx, contractAddress, coinMintSet) {
 				hasMessage = true
@@ -466,7 +508,7 @@ func (s *solana) WebhookReceiver(r *ghttp.Request) {
 	r.Response.WriteStatusExit(200)
 }
 
-// processContractDeposit 处理合约充值：识别 USDT Deposit(index=1)、DepositV5(index=9)、PYTHIA DepositPythia(index=7)、DepositUsdtReserve(index=10)、DepositUsdtSplit(index=11) 和 DepositPythiaV2(index=12)
+// processContractDeposit 处理合约充值：识别 USDT Deposit(index=1)、DepositV5(index=9)、PYTHIA DepositPythia(index=7)、DepositUsdtReserve(index=10)、DepositUsdtSplit(index=11)、DepositPythiaV2(index=12) 和 DepositPythiaV3(index=13)
 func processContractDeposit(mq *amqp.RabbitMQ, tx *rpc.HeliusEnhancedTransaction, contractAddress string, coinMintSet map[string]bool) bool {
 	produced := false
 
@@ -563,9 +605,23 @@ func processContractDeposit(mq *amqp.RabbitMQ, tx *rpc.HeliusEnhancedTransaction
 				g.Log().File("solana-producer.{Y-m-d}.log").Printf("DepositPythiaV2授权地址不匹配: got=%v sig=%v", ix.Accounts[10], tx.Signature)
 				continue
 			}
-			mint, totalAmount, err = extractDepositPythiaV2Amount(tx, depositIx)
+			mint, totalAmount, err = extractDepositPythiaSplitAmount(tx, depositIx)
 			if err != nil {
 				g.Log().File("solana-producer.{Y-m-d}.log").Printf("DepositPythiaV2金额解析失败: err=%v user=%v sig=%v", err, userAddress, tx.Signature)
+				continue
+			}
+		case solanaDepositPythiaV3InstructionIndex:
+			if len(ix.Accounts) != 12 {
+				g.Log().File("solana-producer.{Y-m-d}.log").Printf("DepositPythiaV3账户数量不匹配: got=%v sig=%v", len(ix.Accounts), tx.Signature)
+				continue
+			}
+			if ix.Accounts[11] != solanaDepositPythiaV3Authorization {
+				g.Log().File("solana-producer.{Y-m-d}.log").Printf("DepositPythiaV3授权地址不匹配: got=%v sig=%v", ix.Accounts[11], tx.Signature)
+				continue
+			}
+			mint, totalAmount, err = extractDepositPythiaSplitAmount(tx, depositIx)
+			if err != nil {
+				g.Log().File("solana-producer.{Y-m-d}.log").Printf("DepositPythiaV3金额解析失败: err=%v user=%v sig=%v", err, userAddress, tx.Signature)
 				continue
 			}
 		}
@@ -649,7 +705,7 @@ func extractDepositUsdtSplitTransferAmount(tx *rpc.HeliusEnhancedTransaction, us
 	return mint, totalAmount, nil
 }
 
-func extractDepositPythiaV2Amount(tx *rpc.HeliusEnhancedTransaction, depositIx *solanaContractDepositInstruction) (string, decimal.Decimal, error) {
+func extractDepositPythiaSplitAmount(tx *rpc.HeliusEnhancedTransaction, depositIx *solanaContractDepositInstruction) (string, decimal.Decimal, error) {
 	decimals, ok := getSolanaTokenDecimalsFromTransfers(tx, solanaPythiaMint)
 	if !ok {
 		return "", decimal.Zero, errors.New("pythia decimals not found")
@@ -933,7 +989,7 @@ func (s *solana) ResetHash(r *ghttp.Request) {
 	}
 
 	if !hasMessage {
-		s.FailJsonExit(r, "该交易不满足充值条件（非合约Deposit/DepositV5/DepositPythia/DepositPythiaV2指令、非监控地址或币种不匹配）")
+		s.FailJsonExit(r, "该交易不满足充值条件（非合约Deposit/DepositV5/DepositPythia/DepositPythiaV2/DepositPythiaV3指令、非监控地址或币种不匹配）")
 	}
 
 	mq.Start()

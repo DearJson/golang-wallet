@@ -139,6 +139,8 @@ func (c *solanaWithdraw) Callback(r *ghttp.Request) {
 				"address":          {value.Address},
 				"contract_address": {gconv.String(value.ContractAddress)},
 				"amount":           {gconv.String(value.Amount)},
+				"split_address":    {value.SplitAddress},
+				"split_amount":     {value.SplitAmount},
 				"status":           {gconv.String(value.Status)},
 				"remarks":          {value.Remarks},
 				"hash":             {value.Hash},

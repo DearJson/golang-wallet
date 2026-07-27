@@ -87,6 +87,9 @@ CREATE TABLE `currency` (
   `decimals` int NOT NULL COMMENT '精度',
   `min_withdraw` decimal(15,2) unsigned NOT NULL DEFAULT '0.00' COMMENT '最低提现金额',
   `min_merge` decimal(15,2) unsigned NOT NULL DEFAULT '0.00' COMMENT '最低归集金额',
+  `withdraw_split_enabled` tinyint unsigned NOT NULL DEFAULT '0' COMMENT 'Solana提现固定分账开关：0关闭，1开启',
+  `withdraw_split_address` varchar(255) CHARACTER SET utf8mb3 COLLATE utf8mb3_general_ci DEFAULT NULL COMMENT 'Solana提现固定分账地址',
+  `withdraw_split_amount` decimal(30,18) unsigned NOT NULL DEFAULT '0.000000000000000000' COMMENT 'Solana提现固定分账数量',
   `created_at` timestamp NULL DEFAULT NULL,
   `updated_at` timestamp NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`) USING BTREE
@@ -99,7 +102,7 @@ CREATE TABLE `currency` (
 
 LOCK TABLES `currency` WRITE;
 /*!40000 ALTER TABLE `currency` DISABLE KEYS */;
-INSERT INTO `currency` VALUES (1,'tron','TRX','TBRop8PopYu8atWWez3g3ueVtSpseW78b6',6,0.00,0.00,'2022-03-13 00:04:56','2022-04-11 20:31:27'),(2,'bsc','BNB','0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c',18,0.00,0.00,'2022-03-15 18:13:31','2022-08-23 15:22:39'),(3,'heco','HT','0x0000000000000000000000000000000000000000',18,0.00,0.00,NULL,'2022-05-17 17:49:23'),(50,'bsc','USDT','0x55d398326f99059ff775485246999027b3197955',18,0.00,0.00,'2022-08-03 15:59:40','2022-08-03 15:59:40'),(100,'eth','ETH','0x0000000000000000000000000000000000000000',6,0.00,0.00,'2022-08-03 15:59:40','2022-08-03 15:59:40'),(101,'solana','SOL','So11111111111111111111111111111111111111112',9,0.00,0.00,NULL,NULL),(102,'solana','USDT','Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',6,0.00,0.00,'2026-02-08 18:42:51','2026-02-08 18:42:51');
+INSERT INTO `currency` (`id`,`main_chain`,`name`,`contract_address`,`decimals`,`min_withdraw`,`min_merge`,`created_at`,`updated_at`) VALUES (1,'tron','TRX','TBRop8PopYu8atWWez3g3ueVtSpseW78b6',6,0.00,0.00,'2022-03-13 00:04:56','2022-04-11 20:31:27'),(2,'bsc','BNB','0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c',18,0.00,0.00,'2022-03-15 18:13:31','2022-08-23 15:22:39'),(3,'heco','HT','0x0000000000000000000000000000000000000000',18,0.00,0.00,NULL,'2022-05-17 17:49:23'),(50,'bsc','USDT','0x55d398326f99059ff775485246999027b3197955',18,0.00,0.00,'2022-08-03 15:59:40','2022-08-03 15:59:40'),(100,'eth','ETH','0x0000000000000000000000000000000000000000',6,0.00,0.00,'2022-08-03 15:59:40','2022-08-03 15:59:40'),(101,'solana','SOL','So11111111111111111111111111111111111111112',9,0.00,0.00,NULL,NULL),(102,'solana','USDT','Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',6,0.00,0.00,'2026-02-08 18:42:51','2026-02-08 18:42:51');
 /*!40000 ALTER TABLE `currency` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -1148,6 +1151,8 @@ CREATE TABLE `withdraw` (
   `notify_url` varchar(255) CHARACTER SET utf8mb3 COLLATE utf8mb3_general_ci DEFAULT NULL COMMENT '交易回调地址',
   `token_id` bigint DEFAULT NULL COMMENT 'tokenID (nft使用)',
   `url` varchar(255) CHARACTER SET utf8mb3 COLLATE utf8mb3_general_ci DEFAULT NULL COMMENT 'url (nft使用)',
+  `split_address` varchar(255) CHARACTER SET utf8mb3 COLLATE utf8mb3_general_ci DEFAULT NULL COMMENT 'Solana提现实际分账地址',
+  `split_amount` decimal(30,18) unsigned NOT NULL DEFAULT '0.000000000000000000' COMMENT 'Solana提现实际分账数量',
   `created_at` timestamp NULL DEFAULT NULL,
   `updated_at` timestamp NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`) USING BTREE

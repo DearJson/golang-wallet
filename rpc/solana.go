@@ -31,6 +31,7 @@ const (
 
 	SPLTokenAccountSize       = 165
 	SolanaTxFeeBufferLamports = 10000
+	maxSolanaTransferOutputs  = 2
 )
 
 // Solana知名程序ID（Base58编码）
@@ -44,7 +45,9 @@ const (
 // ==================== Solana RPC 客户端 ====================
 
 // SolanaRpcClient Solana JSON-RPC 客户端
-type SolanaRpcClient struct{}
+type SolanaRpcClient struct {
+	rpcCallOverride func(method string, params interface{}) (json.RawMessage, error)
+}
 
 var SolanaClient = &SolanaRpcClient{}
 
@@ -78,6 +81,9 @@ func getSolanaRpcUrl() string {
 
 // rpcCall 发送Solana JSON-RPC请求
 func (c *SolanaRpcClient) rpcCall(method string, params interface{}) (json.RawMessage, error) {
+	if c.rpcCallOverride != nil {
+		return c.rpcCallOverride(method, params)
+	}
 	reqBody := SolanaRpcRequest{
 		Jsonrpc: "2.0",
 		ID:      1,
@@ -305,6 +311,12 @@ type PreparedSolanaTransaction struct {
 	LastValidBlockHeight uint64
 }
 
+// SolanaTransfer 是同一币种的一笔转账输出，Amount 使用币种最小单位。
+type SolanaTransfer struct {
+	ToAddress string
+	Amount    uint64
+}
+
 func newPreparedSolanaTransaction(signedTx []byte, lastValidBlockHeight uint64) (*PreparedSolanaTransaction, error) {
 	// 当前交易固定只有一个签名，序列化格式为：签名数(1 byte) + 64 byte签名 + message。
 	if len(signedTx) < 65 || signedTx[0] != 1 {
@@ -319,6 +331,15 @@ func newPreparedSolanaTransaction(signedTx []byte, lastValidBlockHeight uint64) 
 
 // PrepareSOL 构建并签名 SOL 转账，但不广播。
 func (c *SolanaRpcClient) PrepareSOL(privateKeyHex string, toAddress string, lamports uint64) (*PreparedSolanaTransaction, error) {
+	return c.PrepareSOLTransfers(privateKeyHex, []SolanaTransfer{{ToAddress: toAddress, Amount: lamports}})
+}
+
+// PrepareSOLTransfers 构建并签名包含多个 SOL 输出的原子交易，但不广播。
+func (c *SolanaRpcClient) PrepareSOLTransfers(privateKeyHex string, transfers []SolanaTransfer) (*PreparedSolanaTransaction, error) {
+	if len(transfers) == 0 || len(transfers) > maxSolanaTransferOutputs {
+		return nil, fmt.Errorf("SOL transfer output count must be between 1 and %d", maxSolanaTransferOutputs)
+	}
+
 	// 1. 解析私钥
 	privKey, err := hdwallet.GetSolanaPrivateKey(privateKeyHex)
 	if err != nil {
@@ -327,21 +348,41 @@ func (c *SolanaRpcClient) PrepareSOL(privateKeyHex string, toAddress string, lam
 	fromPubKey := privKey.Public().(ed25519.PublicKey)
 	fromAddress := hdwallet.SolanaBase58Encode(fromPubKey)
 
-	// 2. 解析目标地址
-	toPubKey, err := hdwallet.SolanaBase58Decode(toAddress)
-	if err != nil {
-		return nil, fmt.Errorf("decode to address error: %v", err)
+	// 2. 解析目标地址并计算总额
+	toPubKeys := make([][]byte, 0, len(transfers))
+	var totalLamports uint64
+	seenAddresses := make(map[string]struct{}, len(transfers))
+	for _, transfer := range transfers {
+		if transfer.Amount == 0 {
+			return nil, fmt.Errorf("SOL transfer amount must be greater than zero: address=%s", transfer.ToAddress)
+		}
+		if _, exists := seenAddresses[transfer.ToAddress]; exists {
+			return nil, fmt.Errorf("duplicate SOL transfer address: %s", transfer.ToAddress)
+		}
+		seenAddresses[transfer.ToAddress] = struct{}{}
+		toPubKey, decodeErr := hdwallet.SolanaBase58Decode(transfer.ToAddress)
+		if decodeErr != nil || len(toPubKey) != ed25519.PublicKeySize {
+			return nil, fmt.Errorf("decode to address error: address=%s err=%v", transfer.ToAddress, decodeErr)
+		}
+		if bytes.Equal(fromPubKey, toPubKey) {
+			return nil, fmt.Errorf("SOL source and destination address are the same: %s", transfer.ToAddress)
+		}
+		if transfer.Amount > ^uint64(0)-totalLamports {
+			return nil, fmt.Errorf("SOL transfer amount overflow")
+		}
+		totalLamports += transfer.Amount
+		toPubKeys = append(toPubKeys, toPubKey)
 	}
 	fromSOLBalance, err := c.GetBalance(fromAddress)
 	if err != nil {
 		return nil, fmt.Errorf("get source SOL balance error: %v", err)
 	}
-	if lamports > ^uint64(0)-SolanaTxFeeBufferLamports || fromSOLBalance < lamports+SolanaTxFeeBufferLamports {
+	if totalLamports > ^uint64(0)-SolanaTxFeeBufferLamports || fromSOLBalance < totalLamports+SolanaTxFeeBufferLamports {
 		return nil, fmt.Errorf(
 			"insufficient SOL balance: owner=%s balance=%d transfer=%d fee_buffer=%d",
 			fromAddress,
 			fromSOLBalance,
-			lamports,
+			totalLamports,
 			SolanaTxFeeBufferLamports,
 		)
 	}
@@ -359,24 +400,30 @@ func (c *SolanaRpcClient) PrepareSOL(privateKeyHex string, toAddress string, lam
 		return nil, fmt.Errorf("decode blockhash error: %v", err)
 	}
 
-	// 5. 构建System Program Transfer指令
-	// 指令数据: [2,0,0,0] (transfer index=2, little-endian u32) + lamports (little-endian u64)
-	instructionData := make([]byte, 12)
-	binary.LittleEndian.PutUint32(instructionData[0:4], 2) // transfer instruction
-	binary.LittleEndian.PutUint64(instructionData[4:12], lamports)
+	// 5. 每个输出构建一条 System Program Transfer 指令。
+	accountKeys := make([][]byte, 0, len(toPubKeys)+2)
+	accountKeys = append(accountKeys, fromPubKey)
+	accountKeys = append(accountKeys, toPubKeys...)
+	accountKeys = append(accountKeys, systemProgramID)
+	programIDIndex := byte(len(accountKeys) - 1)
+	instructions := make([]solanaInstruction, 0, len(transfers))
+	for i, transfer := range transfers {
+		instructionData := make([]byte, 12)
+		binary.LittleEndian.PutUint32(instructionData[0:4], 2)
+		binary.LittleEndian.PutUint64(instructionData[4:12], transfer.Amount)
+		instructions = append(instructions, solanaInstruction{
+			programIDIndex: programIDIndex,
+			accounts:       []byte{0, byte(i + 1)},
+			data:           instructionData,
+		})
+	}
 
 	// 6. 构建交易消息
 	tx := buildTransaction(
-		[]ed25519.PublicKey{fromPubKey},                 // signers
-		[][]byte{fromPubKey, toPubKey, systemProgramID}, // account keys
+		[]ed25519.PublicKey{fromPubKey}, // signers
+		accountKeys,
 		recentBlockhash,
-		[]solanaInstruction{
-			{
-				programIDIndex: 2,            // systemProgramID
-				accounts:       []byte{0, 1}, // from, to
-				data:           instructionData,
-			},
-		},
+		instructions,
 		1, // numRequiredSignatures
 		0, // numReadonlySignedAccounts
 		1, // numReadonlyUnsignedAccounts (system program)
@@ -404,6 +451,15 @@ func (c *SolanaRpcClient) TransferSOL(privateKeyHex string, toAddress string, la
 // amount: 转账金额（最小单位）
 // 返回: 交易签名, error
 func (c *SolanaRpcClient) PrepareSPLToken(privateKeyHex string, toAddress string, mint string, amount uint64) (*PreparedSolanaTransaction, error) {
+	return c.PrepareSPLTokenTransfers(privateKeyHex, mint, []SolanaTransfer{{ToAddress: toAddress, Amount: amount}})
+}
+
+// PrepareSPLTokenTransfers 构建并签名包含多个同 Mint SPL Token 输出的原子交易，但不广播。
+func (c *SolanaRpcClient) PrepareSPLTokenTransfers(privateKeyHex string, mint string, transfers []SolanaTransfer) (*PreparedSolanaTransaction, error) {
+	if len(transfers) == 0 || len(transfers) > maxSolanaTransferOutputs {
+		return nil, fmt.Errorf("SPL token transfer output count must be between 1 and %d", maxSolanaTransferOutputs)
+	}
+
 	// 1. 解析私钥
 	privKey, err := hdwallet.GetSolanaPrivateKey(privateKeyHex)
 	if err != nil {
@@ -413,35 +469,20 @@ func (c *SolanaRpcClient) PrepareSPLToken(privateKeyHex string, toAddress string
 	fromAddress := hdwallet.SolanaBase58Encode(fromPubKey)
 
 	// 2. 解析各种地址
-	toPubKeyBytes, err := hdwallet.SolanaBase58Decode(toAddress)
-	if err != nil {
-		return nil, fmt.Errorf("decode to address error: %v", err)
-	}
 	mintPubKey, err := hdwallet.SolanaBase58Decode(mint)
-	if err != nil {
+	if err != nil || len(mintPubKey) != ed25519.PublicKeySize {
 		return nil, fmt.Errorf("decode mint error: %v", err)
 	}
 	tokenProgramID, _ := hdwallet.SolanaBase58Decode(TokenProgramIDBase58)
 	assocTokenProgramID, _ := hdwallet.SolanaBase58Decode(AssociatedTokenProgramIDBase58)
 	systemProgramID, _ := hdwallet.SolanaBase58Decode(SystemProgramIDBase58)
 
-	// 3. 计算Associated Token Account (ATA)
+	// 3. 校验来源 ATA 与余额。
 	fromATA := findAssociatedTokenAddress(fromPubKey, mintPubKey)
-	toATA := findAssociatedTokenAddress(toPubKeyBytes, mintPubKey)
-	if len(fromATA) != 32 || len(toATA) != 32 {
+	if len(fromATA) != 32 {
 		return nil, fmt.Errorf("derive associated token account failed")
 	}
-	if bytes.Equal(fromATA, toATA) {
-		return nil, fmt.Errorf(
-			"invalid transfer: source and destination token account are the same, owner_from=%s owner_to=%s mint=%s ata=%s",
-			hdwallet.SolanaBase58Encode(fromPubKey),
-			toAddress,
-			mint,
-			hdwallet.SolanaBase58Encode(fromATA),
-		)
-	}
 	fromATAAddr := hdwallet.SolanaBase58Encode(fromATA)
-	toATAAddr := hdwallet.SolanaBase58Encode(toATA)
 	fromTokenAccount, err := c.getSPLTokenAccountInfo(fromATAAddr)
 	if err != nil {
 		return nil, fmt.Errorf("get source token account error: %v", err)
@@ -455,35 +496,78 @@ func (c *SolanaRpcClient) PrepareSPLToken(privateKeyHex string, toAddress string
 	if fromTokenAccount.Owner != hdwallet.SolanaBase58Encode(fromPubKey) {
 		return nil, fmt.Errorf("source token account owner mismatch: ata=%s expected=%s actual=%s", fromATAAddr, hdwallet.SolanaBase58Encode(fromPubKey), fromTokenAccount.Owner)
 	}
-	if fromTokenAccount.Amount < amount {
-		return nil, fmt.Errorf("insufficient SPL token balance: owner=%s mint=%s ata=%s balance=%d amount=%d", hdwallet.SolanaBase58Encode(fromPubKey), mint, fromATAAddr, fromTokenAccount.Amount, amount)
+
+	type destination struct {
+		ownerPubKey []byte
+		ata         []byte
+		account     *splTokenAccountInfo
+		amount      uint64
 	}
-	toTokenAccount, err := c.getSPLTokenAccountInfo(toATAAddr)
-	if err != nil {
-		return nil, fmt.Errorf("get destination token account error: %v", err)
-	}
-	if toTokenAccount != nil {
-		if toTokenAccount.Mint != mint {
-			return nil, fmt.Errorf("destination token account mint mismatch: ata=%s expected=%s actual=%s", toATAAddr, mint, toTokenAccount.Mint)
+	destinations := make([]destination, 0, len(transfers))
+	seenAddresses := make(map[string]struct{}, len(transfers))
+	var totalAmount uint64
+	for _, transfer := range transfers {
+		if transfer.Amount == 0 {
+			return nil, fmt.Errorf("SPL token transfer amount must be greater than zero: address=%s", transfer.ToAddress)
 		}
-		if toTokenAccount.Owner != toAddress {
-			return nil, fmt.Errorf("destination token account owner mismatch: ata=%s expected=%s actual=%s", toATAAddr, toAddress, toTokenAccount.Owner)
+		if _, exists := seenAddresses[transfer.ToAddress]; exists {
+			return nil, fmt.Errorf("duplicate SPL token transfer address: %s", transfer.ToAddress)
 		}
+		seenAddresses[transfer.ToAddress] = struct{}{}
+		ownerPubKey, decodeErr := hdwallet.SolanaBase58Decode(transfer.ToAddress)
+		if decodeErr != nil || len(ownerPubKey) != ed25519.PublicKeySize {
+			return nil, fmt.Errorf("decode to address error: address=%s err=%v", transfer.ToAddress, decodeErr)
+		}
+		toATA := findAssociatedTokenAddress(ownerPubKey, mintPubKey)
+		if len(toATA) != 32 {
+			return nil, fmt.Errorf("derive destination associated token account failed: owner=%s", transfer.ToAddress)
+		}
+		if bytes.Equal(fromATA, toATA) {
+			return nil, fmt.Errorf("invalid transfer: source and destination token account are the same: owner=%s mint=%s", transfer.ToAddress, mint)
+		}
+		if transfer.Amount > ^uint64(0)-totalAmount {
+			return nil, fmt.Errorf("SPL token transfer amount overflow")
+		}
+		totalAmount += transfer.Amount
+		toATAAddr := hdwallet.SolanaBase58Encode(toATA)
+		toTokenAccount, accountErr := c.getSPLTokenAccountInfo(toATAAddr)
+		if accountErr != nil {
+			return nil, fmt.Errorf("get destination token account error: owner=%s err=%v", transfer.ToAddress, accountErr)
+		}
+		if toTokenAccount != nil {
+			if toTokenAccount.Mint != mint {
+				return nil, fmt.Errorf("destination token account mint mismatch: ata=%s expected=%s actual=%s", toATAAddr, mint, toTokenAccount.Mint)
+			}
+			if toTokenAccount.Owner != transfer.ToAddress {
+				return nil, fmt.Errorf("destination token account owner mismatch: ata=%s expected=%s actual=%s", toATAAddr, transfer.ToAddress, toTokenAccount.Owner)
+			}
+		}
+		destinations = append(destinations, destination{ownerPubKey: ownerPubKey, ata: toATA, account: toTokenAccount, amount: transfer.Amount})
 	}
+	if fromTokenAccount.Amount < totalAmount {
+		return nil, fmt.Errorf("insufficient SPL token balance: owner=%s mint=%s ata=%s balance=%d amount=%d", hdwallet.SolanaBase58Encode(fromPubKey), mint, fromATAAddr, fromTokenAccount.Amount, totalAmount)
+	}
+
 	fromSOLBalance, err := c.GetBalance(fromAddress)
 	if err != nil {
 		return nil, fmt.Errorf("get source SOL balance error: %v", err)
 	}
 	requiredLamports := uint64(SolanaTxFeeBufferLamports)
-	if toTokenAccount == nil {
+	missingATACount := 0
+	for _, destination := range destinations {
+		if destination.account == nil {
+			missingATACount++
+		}
+	}
+	if missingATACount > 0 {
 		ataRentLamports, err := c.GetMinimumBalanceForRentExemption(SPLTokenAccountSize)
 		if err != nil {
 			return nil, fmt.Errorf("get token account rent exemption error: %v", err)
 		}
-		if ataRentLamports > ^uint64(0)-requiredLamports {
+		if ataRentLamports > 0 && uint64(missingATACount) > (^uint64(0)-requiredLamports)/ataRentLamports {
 			return nil, fmt.Errorf("required SOL balance overflow")
 		}
-		requiredLamports += ataRentLamports
+		requiredLamports += ataRentLamports * uint64(missingATACount)
 	}
 	if fromSOLBalance < requiredLamports {
 		return nil, fmt.Errorf(
@@ -492,9 +576,9 @@ func (c *SolanaRpcClient) PrepareSPLToken(privateKeyHex string, toAddress string
 			fromSOLBalance,
 			requiredLamports,
 			SolanaTxFeeBufferLamports,
-			toTokenAccount == nil,
-			toAddress,
-			toATAAddr,
+			missingATACount > 0,
+			transfers[0].ToAddress,
+			hdwallet.SolanaBase58Encode(destinations[0].ata),
 			mint,
 		)
 	}
@@ -509,62 +593,70 @@ func (c *SolanaRpcClient) PrepareSPLToken(privateKeyHex string, toAddress string
 		return nil, fmt.Errorf("decode blockhash error: %v", err)
 	}
 
-	// 5. 检查目标ATA是否存在，不存在需要创建
+	// 5. 目标 ATA 不存在时先创建，然后逐一转账。
 	var instructions []solanaInstruction
 	var accountKeys [][]byte
 
-	if toTokenAccount == nil {
-		// 需要先创建ATA
-		// 创建ATA指令：无data，accounts=[payer, ata, owner, mint, system, token_program]
-		// 再加transfer指令
+	if missingATACount > 0 {
 		sysvarRent, _ := hdwallet.SolanaBase58Decode(SysvarRentPubkeyBase58)
-		accountKeys = [][]byte{
-			fromPubKey,          // 0: payer/signer (writable, signer)
-			toATA,               // 1: to ATA (writable)
-			fromATA,             // 2: from ATA (writable)
-			toPubKeyBytes,       // 3: to owner (read-only)
-			mintPubKey,          // 4: mint (read-only)
-			systemProgramID,     // 5: system program (read-only)
-			tokenProgramID,      // 6: token program (read-only)
-			sysvarRent,          // 7: rent sysvar (read-only)
-			assocTokenProgramID, // 8: associated token program (read-only)
+		accountKeys = append(accountKeys, fromPubKey, fromATA)
+		for _, destination := range destinations {
+			accountKeys = append(accountKeys, destination.ata)
 		}
-		// 创建ATA指令: accounts=[payer, ata, owner, mint, system, token_program, rent]
-		instructions = append(instructions, solanaInstruction{
-			programIDIndex: 8, // associated token program
-			accounts:       []byte{0, 1, 3, 4, 5, 6, 7},
-			data:           []byte{},
-		})
-		// Transfer指令: accounts=[from_ata, to_ata, owner/signer]
-		transferData := make([]byte, 9)
-		transferData[0] = 3 // Transfer instruction index
-		binary.LittleEndian.PutUint64(transferData[1:9], amount)
-		instructions = append(instructions, solanaInstruction{
-			programIDIndex: 6,               // token program
-			accounts:       []byte{2, 1, 0}, // from_ata, to_ata, owner/signer
-			data:           transferData,
-		})
+		ownerStart := len(accountKeys)
+		for _, destination := range destinations {
+			accountKeys = append(accountKeys, destination.ownerPubKey)
+		}
+		mintIndex := len(accountKeys)
+		accountKeys = append(accountKeys, mintPubKey)
+		systemIndex := len(accountKeys)
+		accountKeys = append(accountKeys, systemProgramID)
+		tokenIndex := len(accountKeys)
+		accountKeys = append(accountKeys, tokenProgramID)
+		rentIndex := len(accountKeys)
+		accountKeys = append(accountKeys, sysvarRent)
+		associatedTokenIndex := len(accountKeys)
+		accountKeys = append(accountKeys, assocTokenProgramID)
 
-		signedTx := buildAndSignTransaction(privKey, accountKeys, recentBlockhash, instructions, 1, 0, 6)
+		for i, destination := range destinations {
+			destinationATAIndex := byte(i + 2)
+			if destination.account == nil {
+				instructions = append(instructions, solanaInstruction{
+					programIDIndex: byte(associatedTokenIndex),
+					accounts:       []byte{0, destinationATAIndex, byte(ownerStart + i), byte(mintIndex), byte(systemIndex), byte(tokenIndex), byte(rentIndex)},
+					data:           []byte{},
+				})
+			}
+			transferData := make([]byte, 9)
+			transferData[0] = 3
+			binary.LittleEndian.PutUint64(transferData[1:9], destination.amount)
+			instructions = append(instructions, solanaInstruction{
+				programIDIndex: byte(tokenIndex),
+				accounts:       []byte{1, destinationATAIndex, 0},
+				data:           transferData,
+			})
+		}
+
+		readonlyUnsigned := byte(len(destinations) + 5)
+		signedTx := buildAndSignTransaction(privKey, accountKeys, recentBlockhash, instructions, 1, 0, readonlyUnsigned)
 		return newPreparedSolanaTransaction(signedTx, bhResult.Value.LastValidBlockHeight)
 	}
 
-	// 目标ATA已存在，直接transfer
-	accountKeys = [][]byte{
-		fromPubKey,     // 0: owner/signer
-		fromATA,        // 1: from ATA (writable)
-		toATA,          // 2: to ATA (writable)
-		tokenProgramID, // 3: token program
+	accountKeys = append(accountKeys, fromPubKey, fromATA)
+	for _, destination := range destinations {
+		accountKeys = append(accountKeys, destination.ata)
 	}
-	transferData := make([]byte, 9)
-	transferData[0] = 3 // Transfer instruction index
-	binary.LittleEndian.PutUint64(transferData[1:9], amount)
-	instructions = []solanaInstruction{
-		{
-			programIDIndex: 3,               // token program
-			accounts:       []byte{1, 2, 0}, // from_ata, to_ata, owner
+	tokenIndex := byte(len(accountKeys))
+	accountKeys = append(accountKeys, tokenProgramID)
+	for i, destination := range destinations {
+		transferData := make([]byte, 9)
+		transferData[0] = 3
+		binary.LittleEndian.PutUint64(transferData[1:9], destination.amount)
+		instructions = append(instructions, solanaInstruction{
+			programIDIndex: tokenIndex,
+			accounts:       []byte{1, byte(i + 2), 0},
 			data:           transferData,
-		},
+		})
 	}
 
 	signedTx := buildAndSignTransaction(privKey, accountKeys, recentBlockhash, instructions, 1, 0, 1)

@@ -1,12 +1,15 @@
 package api
 
 import (
+	"fmt"
 	"gfast/app/system/dao"
 	"gfast/app/system/service"
+	"gfast/hdwallet"
 
 	"github.com/gogf/gf/frame/g"
 	"github.com/gogf/gf/net/ghttp"
 	"github.com/gogf/gf/util/gvalid"
+	"github.com/shopspring/decimal"
 )
 
 type solanaCurrency struct {
@@ -14,6 +17,31 @@ type solanaCurrency struct {
 }
 
 var SolanaCurrency = new(solanaCurrency)
+
+func validateSolanaWithdrawSplit(enabled int8, address string, amount float64, decimals int) error {
+	if enabled != 0 && enabled != 1 {
+		return fmt.Errorf("提现分账开关只能为0或1")
+	}
+	if enabled == 0 {
+		return nil
+	}
+	addressBytes, err := hdwallet.SolanaBase58Decode(address)
+	if err != nil || len(addressBytes) != 32 {
+		return fmt.Errorf("提现分账地址不是有效的Solana地址")
+	}
+	splitAmount := decimal.NewFromFloat(amount)
+	if !splitAmount.IsPositive() {
+		return fmt.Errorf("提现分账数量必须大于0")
+	}
+	if decimals < 0 || decimals > 255 {
+		return fmt.Errorf("币种精度无效")
+	}
+	scaledAmount := splitAmount.Mul(decimal.New(1, int32(decimals)))
+	if !scaledAmount.Equal(scaledAmount.Truncate(0)) {
+		return fmt.Errorf("提现分账数量不能超过币种精度")
+	}
+	return nil
+}
 
 // List 列表
 func (c *solanaCurrency) List(r *ghttp.Request) {
@@ -42,6 +70,9 @@ func (c *solanaCurrency) Add(r *ghttp.Request) {
 		c.FailJsonExit(r, err.(gvalid.Error).FirstString())
 	}
 	req.MainChain = "solana"
+	if err := validateSolanaWithdrawSplit(req.WithdrawSplitEnabled, req.WithdrawSplitAddress, req.WithdrawSplitAmount, req.Decimals); err != nil {
+		c.FailJsonExit(r, err.Error())
+	}
 	err := service.Currency.Add(r.GetCtx(), req)
 	if err != nil {
 		c.FailJsonExit(r, err.Error())
@@ -69,6 +100,9 @@ func (c *solanaCurrency) Edit(r *ghttp.Request) {
 		c.FailJsonExit(r, err.(gvalid.Error).FirstString())
 	}
 	req.MainChain = "solana"
+	if err := validateSolanaWithdrawSplit(req.WithdrawSplitEnabled, req.WithdrawSplitAddress, req.WithdrawSplitAmount, req.Decimals); err != nil {
+		c.FailJsonExit(r, err.Error())
+	}
 	err := service.Currency.Edit(r.GetCtx(), req)
 	if err != nil {
 		c.FailJsonExit(r, err.Error())

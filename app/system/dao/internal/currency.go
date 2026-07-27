@@ -5,54 +5,67 @@
 // 生成人：gfast
 // ==========================================================================
 
-
 package internal
+
 import (
-    "context"
-    "github.com/gogf/gf/database/gdb"
-    "github.com/gogf/gf/frame/g"
+	"context"
+	"github.com/gogf/gf/database/gdb"
+	"github.com/gogf/gf/frame/g"
 )
+
 // CurrencyDao is the manager for logic model data accessing and custom defined data operations functions management.
 type CurrencyDao struct {
-    Table   string         // Table is the underlying table name of the DAO.
-    Group   string         // Group is the database configuration group name of current DAO.
-    Columns CurrencyColumns // Columns is the short type for Columns, which contains all the column names of Table for convenient usage.
+	Table   string          // Table is the underlying table name of the DAO.
+	Group   string          // Group is the database configuration group name of current DAO.
+	Columns CurrencyColumns // Columns is the short type for Columns, which contains all the column names of Table for convenient usage.
 }
+
 // CurrencyColumns defines and stores column names for table currency.
-type CurrencyColumns struct {    
-    Id  string  //    
-    MainChain  string  // 主链    
-    Name  string  // 币种名称    
-    ContractAddress  string  // 合约地址    
-    Decimals  string  // 精度    
-    CreatedAt  string  //    
-    UpdatedAt  string  //    
+type CurrencyColumns struct {
+	Id                   string //
+	MainChain            string // 主链
+	Name                 string // 币种名称
+	ContractAddress      string // 合约地址
+	Decimals             string // 精度
+	WithdrawSplitEnabled string // Solana提现分账开关
+	WithdrawSplitAddress string // Solana提现分账地址
+	WithdrawSplitAmount  string // Solana提现固定分账数量
+	CreatedAt            string //
+	UpdatedAt            string //
 }
-var currencyColumns = CurrencyColumns{    
-    Id:  "id",    
-    MainChain:  "main_chain",    
-    Name:  "name",    
-    ContractAddress:  "contract_address",    
-    Decimals:  "decimals",    
-    CreatedAt:  "created_at",    
-    UpdatedAt:  "updated_at",    
+
+var currencyColumns = CurrencyColumns{
+	Id:                   "id",
+	MainChain:            "main_chain",
+	Name:                 "name",
+	ContractAddress:      "contract_address",
+	Decimals:             "decimals",
+	WithdrawSplitEnabled: "withdraw_split_enabled",
+	WithdrawSplitAddress: "withdraw_split_address",
+	WithdrawSplitAmount:  "withdraw_split_amount",
+	CreatedAt:            "created_at",
+	UpdatedAt:            "updated_at",
 }
+
 // NewCurrencyDao creates and returns a new DAO object for table data access.
 func NewCurrencyDao() *CurrencyDao {
 	return &CurrencyDao{
-        Group:    "default",
-        Table: "currency",
-        Columns:currencyColumns,
+		Group:   "default",
+		Table:   "currency",
+		Columns: currencyColumns,
 	}
 }
+
 // DB retrieves and returns the underlying raw database management object of current DAO.
 func (dao *CurrencyDao) DB() gdb.DB {
 	return g.DB(dao.Group)
 }
+
 // Ctx creates and returns the Model for current DAO, It automatically sets the context for current operation.
 func (dao *CurrencyDao) Ctx(ctx context.Context) *gdb.Model {
 	return dao.DB().Model(dao.Table).Safe().Ctx(ctx)
 }
+
 // Transaction wraps the transaction logic using function f.
 // It rollbacks the transaction and returns the error from function f if it returns non-nil error.
 // It commits the transaction and returns nil if function f returns nil.

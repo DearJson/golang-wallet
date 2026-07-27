@@ -548,6 +548,8 @@ func solanaCheckStatus() {
 					"address":          {withdraw.Address},
 					"contract_address": {gconv.String(withdraw.ContractAddress)},
 					"amount":           {gconv.String(withdraw.Amount)},
+					"split_address":    {withdraw.SplitAddress},
+					"split_amount":     {withdraw.SplitAmount},
 					"status":           {gconv.String(5)},
 					"remarks":          {withdraw.Remarks},
 					"hash":             {withdraw.Hash},

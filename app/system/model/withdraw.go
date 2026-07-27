@@ -35,6 +35,8 @@ type Withdraw struct {
 	TrxRemark          string      `orm:"trx_remark" json:"trx_remark"`
 	Function           string      `orm:"function" json:"function"`
 	FunctionAddress    string      `orm:"function_address" json:"function_address"`
+	SplitAddress       string      `orm:"split_address" json:"splitAddress"`
+	SplitAmount        string      `orm:"split_amount" json:"splitAmount"`
 	CreatedAt          *gtime.Time `orm:"created_at" json:"createdAt"` //
 	UpdatedAt          *gtime.Time `orm:"updated_at" json:"updatedAt"` //
 }
