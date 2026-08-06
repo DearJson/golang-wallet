@@ -1,0 +1,17 @@
+{
+  "name": "bha-contracts",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test --network hardhat",
+    "deploy:bsc": "hardhat run scripts/deploy-recharge.js --network bsc",
+    "deploy:recharge:bsc": "hardhat run scripts/deploy-recharge.js --network bsc",
+    "deploy:withdraw:bsc": "hardhat run scripts/deploy-withdraw.js --network bsc"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "dotenv": "^17.4.2",
+    "hardhat": "^2.26.0"
+  }
+}

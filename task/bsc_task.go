@@ -10,6 +10,8 @@ import (
 	sservice "gfast/app/system/service"
 	"gfast/library"
 	"gfast/rpc"
+	"strings"
+
 	"github.com/gogf/gf/frame/g"
 	"github.com/gogf/gf/os/gctx"
 	"github.com/gogf/gf/util/gconv"
@@ -79,7 +81,7 @@ func bscSweepTask() {
 			}
 			for _, value := range BscStruct.Transactions {
 				bs := false
-				if contractRecharge && value.To == contractRechargeAddress {
+				if contractRecharge && strings.EqualFold(value.To, contractRechargeAddress) {
 					bs = true
 				}
 				inCoinAddress := false

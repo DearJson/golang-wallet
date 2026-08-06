@@ -48,7 +48,7 @@ func (b *BscSweepConsumer) Consumer(dataByte []byte, key uint64) error {
 	}
 
 	//判断一下这是合约充值还是获取地址充值
-	if g.Config().GetBool("bsc.contract_recharge") && transfer.To == g.Config().GetString("bsc.contract_address") {
+	if g.Config().GetBool("bsc.contract_recharge") && strings.EqualFold(transfer.To, g.Config().GetString("bsc.contract_address")) {
 		err = contractRechargeHandle(&transfer)
 	} else {
 		if g.Config().GetBool("bsc.address_recharge") {
@@ -104,7 +104,23 @@ func contractRechargeHandle(transfer *rpc.BscTransactions) (err error) {
 		customeCoin   string
 	)
 
-	if functionName == "0x68ca0399" {
+	bhaRecharge, err := parseBHARechargeDepositEvent(bscStruct.Logs, transfer.To, transfer.From, coinAddress)
+	if err != nil {
+		return err
+	}
+	if bhaRecharge != nil {
+		amount = bhaRecharge.Amount
+		coinToken = bhaRecharge.CoinToken
+		remarks = bhaRecharge.Remarks
+		rechargeType = bhaRecharge.RechargeType
+		contractAddress = bhaRecharge.ContractAddress
+		amount1 = bhaRecharge.Amount1
+		coinToken1 = bhaRecharge.CoinToken1
+		contractAddress1 = bhaRecharge.ContractAddress1
+		customeUser = bhaRecharge.CustomeUser
+		customeAmount = bhaRecharge.CustomeAmount
+		customeCoin = bhaRecharge.CustomeCoin
+	} else if functionName == "0x68ca0399" {
 		//单币充值
 		contractAddress = "0x" + library.StrPadLeft(strings.TrimLeft(library.SubStr(transfer.Input, 10, 64), "0"), 40, "0")
 		inCoinAddress := false
